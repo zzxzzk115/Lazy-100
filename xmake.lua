@@ -1,5 +1,5 @@
 -- set project name
-set_project("PROJECT_NAME")
+set_project("lazy100")
 
 -- set project version
 set_version("0.1.0")
@@ -13,16 +13,16 @@ set_config("root", is_root)
 set_config("project_dir", os.scriptdir())
 
 -- global options
-option("PROJECT_NAME_build_examples") -- build examples?
+option("lazy100_build_examples") -- build examples?
     set_default(true)
     set_showmenu(true)
-    set_description("Enable PROJECT_NAME examples")
+    set_description("Enable lazy100 examples")
 option_end()
 
-option("PROJECT_NAME_build_tests") -- build tests?
+option("lazy100_build_tests") -- build tests?
     set_default(true)
     set_showmenu(true)
-    set_description("Enable PROJECT_NAME tests")
+    set_description("Enable lazy100 tests")
 option_end()
 
 -- if build on windows
@@ -31,12 +31,9 @@ if is_plat("windows") then
     add_cxxflags("/bigobj") -- avoid big obj
     add_cxxflags("-D_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING")
     add_cxxflags("/EHsc")
-    if is_mode("debug") then
-        set_runtimes("MDd")
-        add_links("ucrtd")
-    else
-        set_runtimes("MD")
-    end
+    -- Static CRT (MT/MTd) to match the VRI package and its ecosystem; VRI links statically,
+    -- so a dynamic CRT here fails with LNK2038 runtime-mismatch errors.
+    set_runtimes(is_mode("debug") and "MTd" or "MT")
 else
     add_cxxflags("-fexceptions")
 end
@@ -67,11 +64,11 @@ includes("external")
 includes("source")
 
 -- include tests
-if has_config("PROJECT_NAME_build_tests") then
+if has_config("lazy100_build_tests") then
     includes("tests")
 end
 
 -- if build examples, then include examples
-if has_config("PROJECT_NAME_build_examples") then
+if has_config("lazy100_build_examples") then
     includes("examples")
 end

@@ -9,15 +9,18 @@ See [DESIGN.md](DESIGN.md) for details.
 
 ---
 
-## M0 — Black Window (boot/present backbone)
+## M0 — Black Window (boot/present backbone) ✅
 
-- [ ] Root `xmake.lua`: `PROJECT_NAME` → `lazy100`, update README
-- [ ] `add_requires` vri / libsdl3 / miniaudio / lua 5.4 / sol2 (VRI is now a custom-repo package — plain `add_requires("vri")`)
-- [ ] `console/window.*`: SDL3 window create + event pump + `vriWindowHandleFromSDL3()`
-- [ ] `gpu/present.*`: VRI device + swapchain creation; debug validation routed to `common/log`
-- [ ] Per frame acquire → clear backbuffer → present; handle `OutOfDate`/resize/minimize
-- [ ] `examples/run/main.cpp`: `Console c; c.Boot(); c.Run();`
+- [x] Root `xmake.lua`: `PROJECT_NAME` → `lazy100`, update README
+- [x] `add_requires` vri / libsdl3 / miniaudio / lua 5.4 / sol2 (VRI is now a custom-repo package — plain `add_requires("vri")`)
+- [x] `console/window.*`: SDL3 window create + event pump + `vriWindowHandleFromSDL3()`
+- [x] `gpu/present.*`: VRI device + swapchain creation; debug validation routed to `common/log`
+- [x] Per frame acquire → clear backbuffer → present; handle `OutOfDate`/resize/minimize
+- [x] `examples/run/main.cpp`: `Console c; c.Boot(); c.Run();`
 - **Acceptance**: a window pops up, stably showing a solid-color clear, and can be closed
+
+> Build note (Windows): the project uses the **static CRT (MT/MTd)** to match the VRI
+> package, and links the Vulkan loader from the system Vulkan SDK in `examples/xmake.lua`.
 
 ## M1 — Framebuffer On-Screen (retire GPU risk)
 
