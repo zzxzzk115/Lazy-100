@@ -26,6 +26,7 @@ namespace lazy100
             return false;
         }
         SDL_RaiseWindow(window_); // claim focus in case a backend's context grab opened us behind
+        SDL_StartTextInput(window_); // editors need typed characters (SDL_EVENT_TEXT_INPUT)
         return true;
     }
 
@@ -45,11 +46,49 @@ namespace lazy100
 
     void Window::pump_events(bool& running)
     {
+        raw_.text.clear(); // text + wheel are per-frame; mouse pos/buttons persist
+        raw_.wheel = 0;
+
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
-            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
-                running = false;
+            switch (e.type)
+            {
+                case SDL_EVENT_QUIT:
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                    running = false;
+                    break;
+                case SDL_EVENT_TEXT_INPUT:
+                    raw_.text += e.text.text;
+                    break;
+                case SDL_EVENT_MOUSE_MOTION:
+                    raw_.mouse_x = static_cast<int>(e.motion.x);
+                    raw_.mouse_y = static_cast<int>(e.motion.y);
+                    break;
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                {
+                    u32 b = 0;
+                    if (e.button.button == SDL_BUTTON_LEFT)
+                        b = 1u << 0;
+                    else if (e.button.button == SDL_BUTTON_RIGHT)
+                        b = 1u << 1;
+                    else if (e.button.button == SDL_BUTTON_MIDDLE)
+                        b = 1u << 2;
+                    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+                        raw_.mouse_buttons |= b;
+                    else
+                        raw_.mouse_buttons &= ~b;
+                    raw_.mouse_x = static_cast<int>(e.button.x);
+                    raw_.mouse_y = static_cast<int>(e.button.y);
+                    break;
+                }
+                case SDL_EVENT_MOUSE_WHEEL:
+                    raw_.wheel += static_cast<int>(e.wheel.y);
+                    break;
+                default:
+                    break;
+            }
         }
     }
 

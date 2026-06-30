@@ -3,9 +3,13 @@
 #include "lazy100/audio/audio.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/window.hpp"
+#include "lazy100/editor/editor.hpp"
 #include "lazy100/gpu/present.hpp"
 #include "lazy100/input/input.hpp"
+#include "lazy100/input/keyboard.hpp"
+#include "lazy100/input/mouse.hpp"
 #include "lazy100/script/lua_runtime.hpp"
+#include "lazy100/shell/shell.hpp"
 #include "lazy100/video/framebuffer.hpp"
 #include "lazy100/video/palette.hpp"
 #include "lazy100/video/sprites.hpp"
@@ -14,9 +18,17 @@
 
 namespace lazy100
 {
-    // Orchestrates the console: owns the window, present layer, framebuffer, palette and the
-    // Lua runtime (input and audio join in later milestones) and runs the main loop. The Lua
-    // API binds against the framebuffer/palette exposed here.
+    // What the main loop is doing: the boot command line, a running cart, or the editor suite.
+    // ESC toggles between them; the shell `run`/`edit` commands switch explicitly.
+    enum class ConsoleMode
+    {
+        Shell,
+        Running,
+        Editor
+    };
+
+    // Orchestrates the console: owns every subsystem and runs the main loop, dispatching
+    // update/draw by mode. The Lua API and the editors bind against the state exposed here.
     class Console
     {
     public:
@@ -27,14 +39,20 @@ namespace lazy100
         Framebuffer& framebuffer() { return framebuffer_; }
         Palette&     palette() { return palette_; }
         Input&       input() { return input_; }
+        Keyboard&    keyboard() { return keyboard_; }
+        Mouse&       mouse() { return mouse_; }
         SpriteSheet& sheet() { return sheet_; }
         Audio&       audio() { return audio_; }
 
+        ConsoleMode mode() const { return mode_; }
+        void        set_mode(ConsoleMode m) { mode_ = m; }
+        bool        start_cart(); // (re)init the loaded cart and switch to Running; false if none
+
         // pal/palt drawing state (persistent across frames, PICO-8 style).
-        u8*         draw_pal() { return draw_pal_.data(); } // color remap applied on blit
-        bool*       transparent() { return transparent_.data(); }
-        void        reset_draw_pal();    // identity remap
-        void        reset_transparent(); // only index 0 transparent
+        u8*  draw_pal() { return draw_pal_.data(); } // color remap applied on blit
+        bool* transparent() { return transparent_.data(); }
+        void  reset_draw_pal();    // identity remap
+        void  reset_transparent(); // only index 0 transparent
 
     private:
         Window      window_;
@@ -42,14 +60,19 @@ namespace lazy100
         Framebuffer framebuffer_;
         Palette     palette_;
         Input       input_;
+        Keyboard    keyboard_;
+        Mouse       mouse_;
         SpriteSheet sheet_;
         Audio       audio_;
         LuaRuntime  lua_;
+        Shell       shell_;
+        EditorHost  editor_host_;
 
         std::array<u8, kPaletteSize>   draw_pal_ {};
         std::array<bool, kPaletteSize> transparent_ {};
 
-        bool has_cart_ = false;
-        bool running_  = true;
+        ConsoleMode mode_      = ConsoleMode::Shell;
+        bool        has_cart_  = false;
+        bool        running_   = true;
     };
 } // namespace lazy100

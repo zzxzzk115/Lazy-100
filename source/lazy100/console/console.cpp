@@ -8,22 +8,6 @@
 
 namespace lazy100
 {
-    namespace
-    {
-        // Fallback still-frame when no cart is given: palette bars + top/left edge markers,
-        // so a bare `lazy100` run still shows that the present path works.
-        void draw_test_pattern(Framebuffer& fb)
-        {
-            fb.cls(0);
-            const int bar = static_cast<int>(kScreenW) / static_cast<int>(kPaletteSize);
-            for (u32 i = 0; i < kPaletteSize; ++i)
-                fb.rectfill(static_cast<int>(i) * bar, 0, static_cast<int>(i) * bar + bar - 1,
-                            static_cast<int>(kScreenH) - 1, static_cast<u8>(i));
-            fb.rectfill(0, 0, static_cast<int>(kScreenW) - 1, 7, 7); // top edge: white
-            fb.rectfill(0, 0, 7, static_cast<int>(kScreenH) - 1, 8); // left edge: red
-        }
-    } // namespace
-
     void Console::reset_draw_pal()
     {
         for (u32 i = 0; i < kPaletteSize; ++i)
@@ -70,15 +54,25 @@ namespace lazy100
         {
             has_cart_ = true;
             lua_.call_init();
+            mode_ = ConsoleMode::Running; // launched with a cart -> play it
         }
         else
         {
             if (cart_path)
-                LZ_WARN("falling back to test pattern (cart failed to load)");
-            draw_test_pattern(framebuffer_);
+                LZ_WARN("cart failed to load: %s", cart_path);
+            mode_ = ConsoleMode::Shell; // bare boot -> the command line
         }
 
         LZ_INFO("console booted (%ux%u virtual, %ux%u window)", kScreenW, kScreenH, w, h);
+        return true;
+    }
+
+    bool Console::start_cart()
+    {
+        if (!has_cart_)
+            return false;
+        lua_.call_init(); // PICO-8 behavior: `run` re-inits
+        mode_ = ConsoleMode::Running;
         return true;
     }
 
@@ -103,20 +97,43 @@ namespace lazy100
             window_.pump_events(running_);
             if (!running_)
                 break;
+            keyboard_.update(window_);
+            mouse_.update(window_);
             input_.poll(); // live held state for btn()
 
-            acc += dt;
-            while (acc >= step)
+            // ESC: Running -> Editor, else toggle Shell <-> Editor.
+            if (keyboard_.pressed(Keyboard::Escape))
+                mode_ = (mode_ == ConsoleMode::Shell) ? ConsoleMode::Editor
+                        : (mode_ == ConsoleMode::Editor) ? ConsoleMode::Shell
+                                                         : ConsoleMode::Editor;
+
+            switch (mode_)
             {
-                input_.begin_step(); // edges + auto-repeat sampled per logic step
-                if (has_cart_)
-                    lua_.call_update();
-                input_.end_step();
-                acc -= step;
+                case ConsoleMode::Running:
+                    acc += dt;
+                    while (acc >= step)
+                    {
+                        input_.begin_step(); // edges + auto-repeat sampled per logic step
+                        if (has_cart_)
+                            lua_.call_update();
+                        input_.end_step();
+                        acc -= step;
+                    }
+                    if (has_cart_)
+                        lua_.call_draw();
+                    break;
+                case ConsoleMode::Shell:
+                    acc = 0.0;
+                    shell_.update(*this);
+                    shell_.draw(*this, framebuffer_);
+                    break;
+                case ConsoleMode::Editor:
+                    acc = 0.0;
+                    editor_host_.update(*this);
+                    editor_host_.draw(*this, framebuffer_);
+                    break;
             }
 
-            if (has_cart_)
-                lua_.call_draw();
             present_.submit_frame(framebuffer_, palette_);
         }
     }
