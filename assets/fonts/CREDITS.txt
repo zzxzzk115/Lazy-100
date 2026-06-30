@@ -1,0 +1,6 @@
+Exogenik.ttf is from the Bagura Font Pack by burloe.
+Source: https://burloe.itch.io/bagura-font
+See the itch.io page for license terms.
+
+Used as Lazy-100's built-in font; baked into source/lazy100/video/font_data.h
+by tools/genfont.ps1 (rendered at its native 10px size).

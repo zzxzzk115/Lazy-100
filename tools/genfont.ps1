@@ -29,6 +29,7 @@ $CW = 16; $CH = 16 # render canvas (generous; glyphs are trimmed to their ink bo
 $glyphRows = @()  # per-glyph array of 16-bit row masks (column bits, LSB = left)
 $glyphMinX = @()
 $glyphW    = @()
+$globalMinY = 99
 $globalMaxY = 0
 for ($code = 32; $code -le 126; $code++) {
     $bmp = New-Object System.Drawing.Bitmap $CW, $CH
@@ -46,6 +47,7 @@ for ($code = 32; $code -le 126; $code++) {
                 $b = $b -bor (1 -shl $x)
                 if ($x -lt $minX) { $minX = $x }
                 if ($x -gt $maxX) { $maxX = $x }
+                if ($y -lt $globalMinY) { $globalMinY = $y }
                 if ($y -gt $globalMaxY) { $globalMaxY = $y }
             }
         }
@@ -58,10 +60,11 @@ for ($code = 32; $code -le 126; $code++) {
     $glyphW    += ($maxX - $minX + 1)
 }
 $font.Dispose()
-$cellH = $globalMaxY + 1
-Write-Output "font=$($fam.Name) ${PixelSize}px  cellHeight=$cellH"
+if ($globalMinY -gt $globalMaxY) { $globalMinY = 0 }
+$cellH = $globalMaxY - $globalMinY + 1
+Write-Output "font=$($fam.Name) ${PixelSize}px  cellHeight=$cellH (ink rows $globalMinY..$globalMaxY)"
 
-# Pass 2: left-trim each glyph, pack cellH bytes (8 columns each).
+# Pass 2: trim top (shift up by globalMinY) + left-trim each glyph, pack cellH bytes.
 $bitmaps = @(); $widths = @()
 for ($i = 0; $i -lt $glyphRows.Count; $i++) {
     $w = $glyphW[$i]; $mx = $glyphMinX[$i]
@@ -69,7 +72,7 @@ for ($i = 0; $i -lt $glyphRows.Count; $i++) {
     $widths += $w
     $bytes = @()
     for ($y = 0; $y -lt $cellH; $y++) {
-        $shifted = (($glyphRows[$i][$y] -shr $mx) -band 0xff)
+        $shifted = (($glyphRows[$i][$y + $globalMinY] -shr $mx) -band 0xff)
         $bytes += $shifted
     }
     $bitmaps += ,$bytes

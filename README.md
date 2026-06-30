@@ -30,10 +30,10 @@ backbone: a window comes up driven by VRI through SDL3). 中文文档见
 
 ## Credits
 
-- Built-in font: **Quaver** by [caffinate](https://caffinate.itch.io/quaver), licensed
-  under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). See
-  [assets/fonts/quaver-license.txt](assets/fonts/quaver-license.txt). Baked into a bitmap
-  by [tools/genfont.ps1](tools/genfont.ps1).
+- Built-in font: **Exogenik**, from the
+  [Bagura Font Pack](https://burloe.itch.io/bagura-font) by **burloe** (10px pixel font).
+  Baked into a bitmap by [tools/genfont.ps1](tools/genfont.ps1); source TTF in
+  [assets/fonts/](assets/fonts/). See the itch.io page for license terms.
 - Renders through [VRI](https://github.com/zzxzzk115/VRI).
 
 ## License
