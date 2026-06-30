@@ -22,16 +22,20 @@ See [DESIGN.md](DESIGN.md) for details.
 > Build note (Windows): the project uses the **static CRT (MT/MTd)** to match the VRI
 > package, and links the Vulkan loader from the system Vulkan SDK in `examples/xmake.lua`.
 
-## M1 — Framebuffer On-Screen (retire GPU risk)
+## M1 — Framebuffer On-Screen (retire GPU risk) ✅
 
-- [ ] `video/palette.*`: 32-entry RGBA8 default palette
-- [ ] `video/framebuffer.*`: 320×240 uint8 index buffer + `cls/pset/rectfill`
-- [ ] `gpu/shaders/present.slang`: full-screen-triangle VS + palette-resolve PS; generate `present_spv.h` (+ `_dxbc.h` as needed) with `vri-shaderc`
-- [ ] `present.*`: R8_UINT index texture + staging-ring upload + palette CBV + NEAREST sampler + full-screen quad
-- [ ] `GetFormatSupport(R8_UINT)` validation at boot (with R8_UNORM fallback)
-- [ ] Integer-scaled letterbox viewport
-- [ ] Hard-coded C++ test pattern + asymmetric sprite to verify Y-flip direction
+- [x] `video/palette.*`: 32-entry RGBA8 default palette (PICO-8 16 + extended 16)
+- [x] `video/framebuffer.*`: 320×240 uint8 index buffer + `cls/pset/rectfill`
+- [x] `gpu/shaders/present.slang`: full-screen-triangle VS + palette-resolve PS; generated `present_spv.h` with the prebuilt `vri-shaderc`
+- [x] `present.*`: R8_UINT index texture + staging-ring upload + palette uniform + full-screen triangle (texelFetch `.Load`, so **no sampler** needed)
+- [x] `GetFormatSupport(R8_UINT)` check at boot (UNORM-fallback shader deferred — R8_UINT is universal on desktop Vulkan)
+- [x] Integer-scaled letterbox viewport
+- [x] Hard-coded C++ test pattern (palette bars + top/left edge markers) to verify orientation
 - **Acceptance**: the 320×240 test pattern is correctly upscaled on-screen, right-side-up, with no blurring
+
+> Gotchas: (1) Slang defaults `Texture2D<uint>` to a SPIR-V `R32ui` image format → mismatch
+> vs the R8_UINT view (undefined fetches); pin it with `[[vk::image_format("r8ui")]]`.
+> (2) **VRI clip space is Y-up** — flip `pos.y` in the present VS or the image is upside down.
 
 ## M2 — Lua Drawing
 
