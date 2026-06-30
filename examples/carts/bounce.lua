@@ -16,10 +16,14 @@ function _update()
   x = mid(5, x, 314)
   y = mid(5, y, 234)
 
-  if btnp(4) then c = (c + 1) % 32 end -- Z: next color (with auto-repeat)
-  if btnp(5) then                       -- X: drop a marker
+  if btnp(4) then        -- Z: next color + a rising beep
+    c = (c + 1) % 32
+    sfx(c % 10)
+  end
+  if btnp(5) then        -- X: drop a marker + a beep
     marks[#marks + 1] = { x = x, y = y, c = c }
     if #marks > 64 then table.remove(marks, 1) end
+    sfx(7)
   end
 end
 

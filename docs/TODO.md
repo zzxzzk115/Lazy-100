@@ -75,12 +75,12 @@ See [DESIGN.md](DESIGN.md) for details.
 - [x] `examples/carts/cjk.lua` — verified Chinese / Japanese / Korean render crisp
 - [x] `/utf-8` MSVC flag for UTF-8 source; `flr`/`ceil` return integers
 
-## M5 — Audio Seam
+## M5 — Audio Seam ✅
 
-- [ ] `audio/audio.*`: miniaudio device + callback (`MINIAUDIO_IMPLEMENTATION` in this TU only)
-- [ ] `sfx()` lock-free queue: Lua pushes id → callback consumes → square-wave beep
-- [ ] Bind `sfx`/`music` (music is a no-op stub)
-- **Acceptance**: a cart calls `sfx(0)` and you hear a beep; the queue boundary is the hook for a future tracker
+- [x] `audio/audio.*`: miniaudio device + callback (`MINIAUDIO_IMPLEMENTATION` in this TU only)
+- [x] `sfx()` lock-free SPSC queue: Lua pushes id → callback consumes → square-wave voices (pentatonic notes, decaying envelope, 4 voices)
+- [x] Bind `sfx`/`music` (music is a no-op stub)
+- **Acceptance**: bounce.lua beeps on Z/X; the queue boundary is the hook for a future tracker ✅
 
 ---
 

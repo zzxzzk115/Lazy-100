@@ -62,6 +62,8 @@ namespace lazy100
         if (!font_ok)
             LZ_WARN("font not loaded; print() text will not render");
 
+        audio_.init(); // non-fatal: sfx() is a no-op if the device can't start
+
         lua_.init(*this);
 
         if (cart_path && lua_.load_cart(cart_path))
@@ -121,6 +123,7 @@ namespace lazy100
 
     void Console::shutdown()
     {
+        audio_.shutdown();
         font::shutdown();
         present_.shutdown();
         window_.destroy();

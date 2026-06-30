@@ -1,5 +1,6 @@
 #include "lazy100/script/lua_api.hpp"
 
+#include "lazy100/audio/audio.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/console.hpp"
 #include "lazy100/input/input.hpp"
@@ -164,6 +165,13 @@ namespace lazy100
                              }
                              trans[fi(*c) & (kPaletteSize - 1)] = t.value_or(true);
                          });
+
+        // ---- audio (v1: square-wave beep; music is a stub) ----
+        Audio& audio = console.audio();
+        lua.set_function("sfx",
+                         [&audio](double n, sol::optional<double> /*chan*/, sol::optional<double> /*off*/)
+                         { audio.trigger_sfx(fi(n)); });
+        lua.set_function("music", [](sol::optional<double>, sol::optional<double>, sol::optional<double>) {});
 
         // ---- input (btn(i)/btnp(i) -> bool; no index -> bitmask) ----
         lua.set_function("btn",

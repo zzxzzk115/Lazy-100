@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lazy100/audio/audio.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/window.hpp"
 #include "lazy100/gpu/present.hpp"
@@ -27,6 +28,7 @@ namespace lazy100
         Palette&     palette() { return palette_; }
         Input&       input() { return input_; }
         SpriteSheet& sheet() { return sheet_; }
+        Audio&       audio() { return audio_; }
 
         // pal/palt drawing state (persistent across frames, PICO-8 style).
         u8*         draw_pal() { return draw_pal_.data(); } // color remap applied on blit
@@ -41,6 +43,7 @@ namespace lazy100
         Palette     palette_;
         Input       input_;
         SpriteSheet sheet_;
+        Audio       audio_;
         LuaRuntime  lua_;
 
         std::array<u8, kPaletteSize>   draw_pal_ {};
