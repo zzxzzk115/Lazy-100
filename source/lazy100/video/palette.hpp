@@ -17,7 +17,8 @@ namespace lazy100
 
         void    set(u32 index, Color32 c);
         Color32 get(u32 index) const { return colors_[index < kPaletteSize ? index : 0]; }
-        void    reset(); // restore the built-in default palette
+        void    reset();              // restore the built-in default palette
+        Color32 default_at(u32 index) const; // the built-in default color for an index
 
         bool dirty() const { return dirty_; }
         void clear_dirty() { dirty_ = false; }

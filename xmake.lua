@@ -28,6 +28,7 @@ option_end()
 -- if build on windows
 if is_plat("windows") then
     add_cxxflags("/Zc:__cplusplus", {tools = {"msvc", "cl"}}) -- fix __cplusplus == 199711L error
+    add_cxxflags("/utf-8", {tools = {"msvc", "cl"}}) -- source is UTF-8 (CJK comments/strings)
     add_cxxflags("/bigobj") -- avoid big obj
     add_cxxflags("-D_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING")
     add_cxxflags("/EHsc")

@@ -25,6 +25,8 @@ namespace lazy100
         repack();
     }
 
+    Color32 Palette::default_at(u32 index) const { return kDefault[index < kPaletteSize ? index : 0]; }
+
     void Palette::set(u32 index, Color32 c)
     {
         if (index >= kPaletteSize)

@@ -30,10 +30,10 @@ backbone: a window comes up driven by VRI through SDL3). 中文文档见
 
 ## Credits
 
-- Built-in font: **Exogenik**, from the
-  [Bagura Font Pack](https://burloe.itch.io/bagura-font) by **burloe** (10px pixel font).
-  Baked into a bitmap by [tools/genfont.ps1](tools/genfont.ps1); source TTF in
-  [assets/fonts/](assets/fonts/). See the itch.io page for license terms.
+- Built-in font: **[Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)**
+  (缝合像素字体, 10px, pan-CJK) by **TakWolf** and contributors, under the
+  [SIL OFL 1.1](assets/fonts/fusion-pixel-OFL.txt) — see [assets/fonts/](assets/fonts/).
+  Rasterized at runtime with **stb_truetype** so `print()` renders any UTF-8 (Latin + 中日韩).
 - Renders through [VRI](https://github.com/zzxzzk115/VRI).
 
 ## License

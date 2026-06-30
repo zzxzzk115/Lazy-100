@@ -1,6 +1,8 @@
-Exogenik.ttf is from the Bagura Font Pack by burloe.
-Source: https://burloe.itch.io/bagura-font
-See the itch.io page for license terms.
+Built-in font: Fusion Pixel Font (缝合像素字体), 10px proportional, Latin variant.
+Author:  TakWolf and contributors
+Source:  https://github.com/TakWolf/fusion-pixel-font
+Release: 2026.07.01
+License: SIL Open Font License 1.1 -- see fusion-pixel-OFL.txt
 
 Used as Lazy-100's built-in font; baked into source/lazy100/video/font_data.h
 by tools/genfont.ps1 (rendered at its native 10px size).

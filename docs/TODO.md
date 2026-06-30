@@ -58,14 +58,22 @@ See [DESIGN.md](DESIGN.md) for details.
 > Gotcha: Lua numbers are doubles, and sol2 refuses float→int args. Bind draw/input
 > coordinate params as `double` and `floor()` them (PICO-8 coordinate semantics).
 
-## M4 — Sprites + Font
+## M4 — Sprites + Font ✅
 
-- [ ] `video/sprites.*`: 128×128 index sprite sheet + `spr`/`sspr`/`sget`/`sset`, flip
-- [ ] `pal`/`palt` transparency (index 0 transparent by default)
-- [ ] Bind spr/sspr/sget/sset/fget/fset/pal/palt
-- [ ] Sprite data source: sset() or side-car indexed PNG load
-- [ ] `examples/carts/sprite.lua`
-- **Acceptance**: sprites draw correctly with transparency, flip / palette remap take effect
+- [x] `video/sprites.*`: 128×128 index sprite sheet + `spr`/`sspr`/`sget`/`sset`/`fget`/`fset`, flip
+- [x] `pal`/`palt` transparency (index 0 transparent by default) + draw/screen palette remap
+- [x] Bind spr/sspr/sget/sset/fget/fset/pal/palt
+- [x] Sprite data source: `sset()` from Lua (side-car PNG load deferred)
+- [x] `examples/carts/sprite.lua`
+- **Acceptance**: sprites draw correctly with transparency, flip / palette remap take effect ✅
+
+### Font → runtime CJK rasterization (replaces the baked bitmap font)
+
+- [x] `video/font.*` rewritten to rasterize glyphs on demand with **stb_truetype** + cache
+- [x] UTF-8 decode in `print`; half-width Latin + full-width 中日韩 advance from font metrics
+- [x] Load the [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font) (pan-CJK, OFL) at boot
+- [x] `examples/carts/cjk.lua` — verified Chinese / Japanese / Korean render crisp
+- [x] `/utf-8` MSVC flag for UTF-8 source; `flr`/`ceil` return integers
 
 ## M5 — Audio Seam
 

@@ -2,6 +2,7 @@
 
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/config.hpp"
+#include "lazy100/video/font.hpp"
 
 #include <chrono>
 
@@ -23,6 +24,18 @@ namespace lazy100
         }
     } // namespace
 
+    void Console::reset_draw_pal()
+    {
+        for (u32 i = 0; i < kPaletteSize; ++i)
+            draw_pal_[i] = static_cast<u8>(i);
+    }
+
+    void Console::reset_transparent()
+    {
+        for (u32 i = 0; i < kPaletteSize; ++i)
+            transparent_[i] = (i == 0); // index 0 transparent by default
+    }
+
     bool Console::boot(const char* cart_path)
     {
         const u32 w = kScreenW * kDefaultScale;
@@ -31,6 +44,24 @@ namespace lazy100
             return false;
         if (!present_.init(window_))
             return false;
+        reset_draw_pal();
+        reset_transparent();
+
+        // Built-in font (runtime-rasterized). Try the project-relative path (xmake run) first.
+        static const char* const kFontPaths[] = {
+            "assets/fonts/fusion-pixel-10px-proportional-zh_hans.ttf",
+            "../assets/fonts/fusion-pixel-10px-proportional-zh_hans.ttf",
+        };
+        bool font_ok = false;
+        for (const char* path : kFontPaths)
+            if (font::init(path))
+            {
+                font_ok = true;
+                break;
+            }
+        if (!font_ok)
+            LZ_WARN("font not loaded; print() text will not render");
+
         lua_.init(*this);
 
         if (cart_path && lua_.load_cart(cart_path))
@@ -90,6 +121,7 @@ namespace lazy100
 
     void Console::shutdown()
     {
+        font::shutdown();
         present_.shutdown();
         window_.destroy();
     }
