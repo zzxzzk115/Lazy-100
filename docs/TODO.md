@@ -37,15 +37,15 @@ See [DESIGN.md](DESIGN.md) for details.
 > vs the R8_UINT view (undefined fetches); pin it with `[[vk::image_format("r8ui")]]`.
 > (2) **VRI clip space is Y-up** — flip `pos.y` in the present VS or the image is upside down.
 
-## M2 — Lua Drawing
+## M2 — Lua Drawing ✅
 
-- [ ] `script/lua_runtime.*`: sol::state, load `.lua` cart, resolve `_init`/`_draw` (`sol::protected_function` error containment)
-- [ ] `video/draw.*`: line/rect/rectfill/circ/circfill/clip/camera
-- [ ] `video/font.*`: 1bpp bitmap font + `print`
-- [ ] `script/lua_api.*`: bind cls/pset/pget/line/rect/rectfill/circ/circfill/clip/camera/print + math (flr/min/max/rnd/sin/cos...)
-- [ ] `cart/cart.*`: load a pure `.lua` from disk
-- [ ] `examples/carts/hello.lua`
-- **Acceptance**: a cart draws shapes and text in Lua and displays them
+- [x] `script/lua_runtime.*`: sol::state, load `.lua` cart, resolve `_init`/`_draw` (`sol::protected_function` error containment)
+- [x] `video/draw.*`: line/rect/circ/circfill (cls/pset/pget/rectfill live on Framebuffer); clip/camera deferred to M4
+- [x] `video/font.*`: proportional bitmap font (Quaver, CC BY 3.0) baked by `tools/genfont.ps1` + `print`
+- [x] `script/lua_api.*`: bind cls/pset/pget/line/rect/rectfill/circ/circfill/print + math (flr/ceil/abs/min/max/mid/sgn/sqrt/sin/cos/atan2/rnd/srand/t)
+- [x] cart loading: `lua_runtime.load_cart()` runs a pure `.lua` from disk (dedicated `cart/` module deferred until the cart format matters)
+- [x] `examples/carts/hello.lua`
+- **Acceptance**: a cart draws animated shapes + text in Lua and displays them ✅
 
 ## M3 — Loop + Input
 

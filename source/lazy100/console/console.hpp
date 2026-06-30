@@ -2,25 +2,32 @@
 
 #include "lazy100/console/window.hpp"
 #include "lazy100/gpu/present.hpp"
+#include "lazy100/script/lua_runtime.hpp"
 #include "lazy100/video/framebuffer.hpp"
 #include "lazy100/video/palette.hpp"
 
 namespace lazy100
 {
-    // Orchestrates the console: owns the window, present layer, framebuffer and palette
-    // (and, from later milestones, input, audio and the Lua runtime) and runs the main loop.
+    // Orchestrates the console: owns the window, present layer, framebuffer, palette and the
+    // Lua runtime (input and audio join in later milestones) and runs the main loop. The Lua
+    // API binds against the framebuffer/palette exposed here.
     class Console
     {
     public:
-        bool boot();
+        bool boot(const char* cart_path = nullptr);
         void run();
         void shutdown();
+
+        Framebuffer& framebuffer() { return framebuffer_; }
+        Palette&     palette() { return palette_; }
 
     private:
         Window      window_;
         Present     present_;
         Framebuffer framebuffer_;
         Palette     palette_;
-        bool        running_ = true;
+        LuaRuntime  lua_;
+        bool        has_cart_ = false;
+        bool        running_  = true;
     };
 } // namespace lazy100

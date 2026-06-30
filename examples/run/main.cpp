@@ -1,11 +1,13 @@
 // Lazy-100 host entry point. `xmake run lazy100 [cart.lua]`.
-// M0 just boots the console and shows a window; cart loading arrives in M2.
+// With a cart path it loads and runs it; with none it shows the test pattern.
 #include "lazy100/console/console.hpp"
 
-int main(int /*argc*/, char** /*argv*/)
+int main(int argc, char** argv)
 {
+    const char* cart = argc > 1 ? argv[1] : nullptr;
+
     lazy100::Console console;
-    if (!console.boot())
+    if (!console.boot(cart))
         return 1;
     console.run();
     console.shutdown();

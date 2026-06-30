@@ -28,6 +28,14 @@ Under construction — see [docs/DESIGN.md](docs/DESIGN.md) for the architecture
 backbone: a window comes up driven by VRI through SDL3). 中文文档见
 [docs/zh_CN/](docs/zh_CN/).
 
+## Credits
+
+- Built-in font: **Quaver** by [caffinate](https://caffinate.itch.io/quaver), licensed
+  under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). See
+  [assets/fonts/quaver-license.txt](assets/fonts/quaver-license.txt). Baked into a bitmap
+  by [tools/genfont.ps1](tools/genfont.ps1).
+- Renders through [VRI](https://github.com/zzxzzk115/VRI).
+
 ## License
 
-MIT © Lazy_V
+MIT © Lazy_V (project code; bundled assets keep their own licenses — see Credits)

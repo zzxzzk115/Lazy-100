@@ -7,10 +7,8 @@ namespace lazy100
 {
     namespace
     {
-        // M1 still-frame: 32 vertical palette bars (left -> right = index 0..31), a white
-        // strip along the TOP edge and a red strip down the LEFT edge. Together these make
-        // the image orientation unambiguous (verifies the present Y-flip / scaling) and show
-        // every palette color. Replaced by Lua _draw output in M2.
+        // Fallback still-frame when no cart is given: palette bars + top/left edge markers,
+        // so a bare `lazy100` run still shows that the present path works.
         void draw_test_pattern(Framebuffer& fb)
         {
             fb.cls(0);
@@ -23,7 +21,7 @@ namespace lazy100
         }
     } // namespace
 
-    bool Console::boot()
+    bool Console::boot(const char* cart_path)
     {
         const u32 w = kScreenW * kDefaultScale;
         const u32 h = kScreenH * kDefaultScale;
@@ -31,7 +29,20 @@ namespace lazy100
             return false;
         if (!present_.init(window_))
             return false;
-        draw_test_pattern(framebuffer_);
+        lua_.init(*this);
+
+        if (cart_path && lua_.load_cart(cart_path))
+        {
+            has_cart_ = true;
+            lua_.call_init();
+        }
+        else
+        {
+            if (cart_path)
+                LZ_WARN("falling back to test pattern (cart failed to load)");
+            draw_test_pattern(framebuffer_);
+        }
+
         LZ_INFO("console booted (%ux%u virtual, %ux%u window)", kScreenW, kScreenH, w, h);
         return true;
     }
@@ -43,6 +54,8 @@ namespace lazy100
             window_.pump_events(running_);
             if (!running_)
                 break;
+            if (has_cart_)
+                lua_.call_draw(); // M2: cart redraws each frame (fixed timestep + _update land in M3)
             present_.submit_frame(framebuffer_, palette_);
         }
     }
