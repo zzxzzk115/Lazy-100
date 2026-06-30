@@ -8,7 +8,7 @@ namespace lazy100
     struct LuaRuntime::Impl
     {
         sol::state              lua;
-        sol::protected_function init, update, draw;
+        sol::protected_function init, update, update60, draw;
     };
 
     LuaRuntime::LuaRuntime()  = default;
@@ -33,9 +33,10 @@ namespace lazy100
             LZ_ERROR("cart load failed (%s): %s", path, err.what());
             return false;
         }
-        p_->init   = p_->lua["_init"];
-        p_->update = p_->lua["_update"];
-        p_->draw   = p_->lua["_draw"];
+        p_->init     = p_->lua["_init"];
+        p_->update   = p_->lua["_update"];
+        p_->update60 = p_->lua["_update60"];
+        p_->draw     = p_->lua["_draw"];
         LZ_INFO("cart loaded: %s", path);
         return true;
     }
@@ -62,7 +63,12 @@ namespace lazy100
     }
     void LuaRuntime::call_update()
     {
-        if (p_)
+        if (!p_)
+            return;
+        // A cart picks its logic rate by which callback it defines; _update60 wins.
+        if (p_->update60.valid())
+            call_cb(p_->update60, "_update60");
+        else
             call_cb(p_->update, "_update");
     }
     void LuaRuntime::call_draw()
@@ -71,6 +77,7 @@ namespace lazy100
             call_cb(p_->draw, "_draw");
     }
 
-    bool LuaRuntime::has_update() const { return p_ && p_->update.valid(); }
+    bool LuaRuntime::has_update() const { return p_ && (p_->update.valid() || p_->update60.valid()); }
     bool LuaRuntime::has_draw() const { return p_ && p_->draw.valid(); }
+    bool LuaRuntime::wants_60hz() const { return p_ && p_->update60.valid(); }
 } // namespace lazy100

@@ -26,6 +26,7 @@ namespace lazy100
 
         bool has_update() const;
         bool has_draw() const;
+        bool wants_60hz() const; // true if the cart defines _update60
 
     private:
         struct Impl;

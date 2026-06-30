@@ -3,6 +3,8 @@
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/config.hpp"
 
+#include <chrono>
+
 namespace lazy100
 {
     namespace
@@ -49,13 +51,39 @@ namespace lazy100
 
     void Console::run()
     {
+        using clock = std::chrono::steady_clock;
+
+        // Fixed logic step: 30 Hz, or 60 Hz if the cart defines _update60. Render follows
+        // vsync; the accumulator runs 0..N catch-up steps per rendered frame.
+        const double step = (has_cart_ && lua_.wants_60hz()) ? (1.0 / 60.0) : (1.0 / 30.0);
+        auto         prev = clock::now();
+        double       acc  = 0.0;
+
         while (running_)
         {
+            const auto now = clock::now();
+            double     dt  = std::chrono::duration<double>(now - prev).count();
+            prev           = now;
+            if (dt > 0.25)
+                dt = 0.25; // clamp to dodge the spiral of death after a stall
+
             window_.pump_events(running_);
             if (!running_)
                 break;
+            input_.poll(); // live held state for btn()
+
+            acc += dt;
+            while (acc >= step)
+            {
+                input_.begin_step(); // edges + auto-repeat sampled per logic step
+                if (has_cart_)
+                    lua_.call_update();
+                input_.end_step();
+                acc -= step;
+            }
+
             if (has_cart_)
-                lua_.call_draw(); // M2: cart redraws each frame (fixed timestep + _update land in M3)
+                lua_.call_draw();
             present_.submit_frame(framebuffer_, palette_);
         }
     }

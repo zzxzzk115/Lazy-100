@@ -2,6 +2,7 @@
 
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/console.hpp"
+#include "lazy100/input/input.hpp"
 #include "lazy100/video/draw.hpp"
 #include "lazy100/video/font.hpp"
 #include "lazy100/video/framebuffer.hpp"
@@ -28,14 +29,18 @@ namespace lazy100
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         }
 
+        // Lua numbers are doubles; the console floors coordinates (PICO-8 semantics) so carts
+        // can pass fractional positions straight in without sol2 rejecting float->int.
+        int fi(double v) { return static_cast<int>(std::floor(v)); }
+        int fi(sol::optional<double> v, int def) { return v ? fi(*v) : def; }
+
         // Resolve a Lua color arg to a palette index, wrapping into range; default when omitted.
-        u8 col(sol::optional<int> c, u8 def)
+        u8 col(sol::optional<double> c, u8 def)
         {
-            return c ? static_cast<u8>(static_cast<u32>(*c) & (kPaletteSize - 1)) : def;
+            return c ? static_cast<u8>(static_cast<u32>(fi(*c)) & (kPaletteSize - 1)) : def;
         }
 
-        // Stringify a print() argument the way a fantasy console expects (numbers without a
-        // trailing ".0", booleans as words).
+        // Stringify a print() argument (numbers without a trailing ".0", booleans as words).
         std::string to_text(const sol::object& o)
         {
             if (o.is<std::string>())
@@ -59,28 +64,54 @@ namespace lazy100
     void bind_api(sol::state& lua, Console& console)
     {
         Framebuffer& fb = console.framebuffer();
+        Input&       in = console.input();
 
-        // ---- graphics (color = palette index; default pen is 7/white, cls is 0/black) ----
-        lua.set_function("cls", [&fb](sol::optional<int> c) { fb.cls(col(c, 0)); });
-        lua.set_function("pset", [&fb](int x, int y, sol::optional<int> c) { fb.pset(x, y, col(c, 7)); });
-        lua.set_function("pget", [&fb](int x, int y) { return static_cast<int>(fb.pget(x, y)); });
+        // ---- graphics (coords floored; color = palette index, default pen 7, cls 0) ----
+        lua.set_function("cls", [&fb](sol::optional<double> c) { fb.cls(col(c, 0)); });
+        lua.set_function("pset",
+                         [&fb](double x, double y, sol::optional<double> c) { fb.pset(fi(x), fi(y), col(c, 7)); });
+        lua.set_function("pget", [&fb](double x, double y) { return static_cast<int>(fb.pget(fi(x), fi(y))); });
         lua.set_function("rectfill",
-                         [&fb](int x0, int y0, int x1, int y1, sol::optional<int> c)
-                         { fb.rectfill(x0, y0, x1, y1, col(c, 7)); });
+                         [&fb](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { fb.rectfill(fi(x0), fi(y0), fi(x1), fi(y1), col(c, 7)); });
         lua.set_function("rect",
-                         [&fb](int x0, int y0, int x1, int y1, sol::optional<int> c)
-                         { draw::rect(fb, x0, y0, x1, y1, col(c, 7)); });
+                         [&fb](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { draw::rect(fb, fi(x0), fi(y0), fi(x1), fi(y1), col(c, 7)); });
         lua.set_function("line",
-                         [&fb](int x0, int y0, int x1, int y1, sol::optional<int> c)
-                         { draw::line(fb, x0, y0, x1, y1, col(c, 7)); });
-        lua.set_function("circ", [&fb](int x, int y, int r, sol::optional<int> c) { draw::circ(fb, x, y, r, col(c, 7)); });
+                         [&fb](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { draw::line(fb, fi(x0), fi(y0), fi(x1), fi(y1), col(c, 7)); });
+        lua.set_function("circ",
+                         [&fb](double x, double y, double r, sol::optional<double> c)
+                         { draw::circ(fb, fi(x), fi(y), fi(r), col(c, 7)); });
         lua.set_function("circfill",
-                         [&fb](int x, int y, int r, sol::optional<int> c) { draw::circfill(fb, x, y, r, col(c, 7)); });
+                         [&fb](double x, double y, double r, sol::optional<double> c)
+                         { draw::circfill(fb, fi(x), fi(y), fi(r), col(c, 7)); });
 
         // ---- text ----
         lua.set_function("print",
-                         [&fb](sol::object text, sol::optional<int> x, sol::optional<int> y, sol::optional<int> c)
-                         { return font::print(fb, to_text(text).c_str(), x.value_or(0), y.value_or(0), col(c, 7)); });
+                         [&fb](sol::object text, sol::optional<double> x, sol::optional<double> y,
+                               sol::optional<double> c)
+                         { return font::print(fb, to_text(text).c_str(), fi(x, 0), fi(y, 0), col(c, 7)); });
+
+        // ---- input (btn(i)/btnp(i) -> bool; no index -> bitmask) ----
+        lua.set_function("btn",
+                         [&in](sol::this_state ts, sol::optional<double> i, sol::optional<double> p) -> sol::object
+                         {
+                             sol::state_view L(ts);
+                             const int       player = fi(p, 0);
+                             if (i)
+                                 return sol::make_object(L, in.held(fi(*i), player));
+                             return sol::make_object(L, static_cast<int>(in.held_mask(player)));
+                         });
+        lua.set_function("btnp",
+                         [&in](sol::this_state ts, sol::optional<double> i, sol::optional<double> p) -> sol::object
+                         {
+                             sol::state_view L(ts);
+                             const int       player = fi(p, 0);
+                             if (i)
+                                 return sol::make_object(L, in.pressed(fi(*i), player));
+                             return sol::make_object(L, static_cast<int>(in.pressed_mask(player)));
+                         });
 
         // ---- math helpers carts expect ----
         lua.set_function("flr", [](double x) { return std::floor(x); });

@@ -47,13 +47,16 @@ See [DESIGN.md](DESIGN.md) for details.
 - [x] `examples/carts/hello.lua`
 - **Acceptance**: a cart draws animated shapes + text in Lua and displays them ✅
 
-## M3 — Loop + Input
+## M3 — Loop + Input ✅
 
-- [ ] `console/console.*`: fixed-timestep accumulator (30Hz, `_update60` → 60Hz), `min(dt,0.25)` clamp
-- [ ] `input/input.*`: 6-button virtual gamepad, SDL3 keymap, `held/prev/pressed` masks, per-step edges, auto-repeat (every 4 after 15)
-- [ ] Bind `btn`/`btnp`, wire up `_update`
-- [ ] `examples/carts/bounce.lua` (interactively movable dot)
-- **Acceptance**: arrow keys/Z/X respond live, btnp fires exactly once on a single-frame tap
+- [x] `console/console.*`: fixed-timestep accumulator (30Hz, `_update60` → 60Hz), `min(dt,0.25)` clamp
+- [x] `input/input.*`: 6-button virtual gamepad, SDL3 keymap (arrows + Z/C, X/V), `held/prev/pressed` masks, per-step edges, auto-repeat (every 4 after 15)
+- [x] Bind `btn`/`btnp`, wire up `_update`
+- [x] `examples/carts/bounce.lua` (interactively movable dot)
+- **Acceptance**: arrow keys/Z/X respond live, btnp fires exactly once on a single-frame tap ✅
+
+> Gotcha: Lua numbers are doubles, and sol2 refuses float→int args. Bind draw/input
+> coordinate params as `double` and `floor()` them (PICO-8 coordinate semantics).
 
 ## M4 — Sprites + Font
 
