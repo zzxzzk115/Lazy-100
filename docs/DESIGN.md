@@ -4,7 +4,7 @@
 
 Lazy-100 is a **fantasy console**, in the spirit of PICO-8 / TIC-80 / basic8, but with a resolution fixed at **320×240** (128×128 is too small to read text), scripted in **Lua 5.4**. It **stands on the shoulders of VRI** — VRI (`../VRI`) is a cross-backend RHI (Render Hardware Interface, abstracting Vulkan / D3D12 / WebGPU / GL).
 
-This document describes the architecture of the **runtime kernel (v1)**. The in-console editors (code / sprite / map / music tracker) belong to later versions and are out of scope here.
+This document describes the architecture of the **runtime kernel**. The in-console editor suite (shell, code / sprite / map / sfx / music editors) and the `.lz100` cart format are built on top of this kernel — see [TODO.md](TODO.md) (milestones M6–M11) for that layer.
 
 ---
 

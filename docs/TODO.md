@@ -1,9 +1,9 @@
-# Lazy-100 TODO (Runtime Kernel / MVP v1)
+# Lazy-100 TODO (Runtime Kernel + Editor Suite V1)
 
 > 中文版见 [zh_CN/TODO.md](zh_CN/TODO.md)。
 
-Vertical-slice milestones — **at the end of every milestone you can run `xmake && xmake run lazy100 examples/carts/<cart>.lua`**.
-M0/M1 retire VRI-integration and GPU risk before building the Lua/gameplay layer.
+Vertical-slice milestones — **at the end of every milestone you can run `xmake && xmake run lazy100 carts/<cart>.lua`** (or `xmake run lazy100` with no cart to boot into the shell).
+M0/M1 retire VRI-integration and GPU risk before building the Lua/gameplay layer; M6+ add the in-console editors.
 
 See [DESIGN.md](DESIGN.md) for details.
 
@@ -84,9 +84,65 @@ See [DESIGN.md](DESIGN.md) for details.
 
 ---
 
-## Later Versions (not in v1)
-- In-console editors: code editor, sprite editor, map editor, music tracker
-- Cart packaging format (`__lua__`/`__gfx__`/`__sfx__` sections)
-- Full audio synth / tracker
+# Editor Suite V1 (in-console authoring + cart format)
+
+The runtime kernel can *play* a cart; V1 makes the console *self-contained* — author code,
+sprites, maps, and music inside it and save/load a single shareable `.lz100`.
+
+## M6 — Shell + mode system + full input ✅
+
+- [x] `console/window.*`: pump text input (`SDL_EVENT_TEXT_INPUT`) + mouse motion/buttons/wheel
+- [x] `input/keyboard.*`: full-keyboard edges + auto-repeat + typed UTF-8 (distinct from the game `Input`)
+- [x] `input/mouse.*`: cursor mapped into the 320×240 framebuffer via the letterbox transform + button edges
+- [x] `console/console.*`: `ConsoleMode {Shell, Running, Editor}` dispatch; ESC toggles
+- [x] `shell/shell.*`: Linux-like command line (cd/pwd/ls/help/tab-completion/history), sandboxed to `carts/`
+- [x] `editor/editor.*`: `Editor` interface + `EditorHost` tab bar
+- **Acceptance**: boot into the shell, type/`ls`; ESC into the tabbed editor ✅
+
+## M7 — Cart model + `.lz100` load/save ✅
+
+- [x] `cart/cart.*`: PICO-8-style single text file, section parse/serialize
+- [x] Run from `Console::code()` (not a file); restore sprite sheet on load
+- [x] Shell `load`/`save`/`run`/`new`; assets embedded in the binary via `.rc`/`.S` + in-memory VFS
+- **Acceptance**: `load demo.lz100` → `run`; `save` round-trips code + sprites ✅
+
+## M8 — Sprite editor ✅
+
+- [x] `editor/sprite_editor.*`: magnified canvas, palette grid, sheet navigator, eyedropper
+- **Acceptance**: paint a sprite → `run` a cart that `spr()`s it; persists in `__gfx__` ✅
+
+## Spec upgrade — a notch above PICO-8 ✅
+
+- [x] Palette 32 → **256** colors; sprites 8×8 → **16×16**; sheet 128×128 → **256×256**
+- [x] Rippled through palette default, present shader (`uint4[64]`), sprites, cart `__gfx__`, sprite editor
+
+## M9 — Map + map runtime ✅
+
+- [x] `world/map.*`: 128×64 tiles; Lua `mget`/`mset`/`map(cx,cy,sx,sy,cw,ch)` (16px tiles)
+- [x] `editor/map_editor.*`: scrolling viewport (paint/erase, arrow-key pan), sprite picker, tile preview
+- [x] cart `__map__` section
+- **Acceptance**: paint a map → cart `map()` renders it; round-trips ✅
+
+## M10 — Code editor ✅
+
+- [x] `editor/code_editor.*`: line buffer, cursor/scroll/insert/delete/newline/Tab, line-number gutter, caret
+- [x] UTF-8 aware (cursor steps whole codepoints — 中日韩 edit correctly); stays in sync with `Console::code()`
+- **Acceptance**: edit Lua in-console → ESC → shell `run` picks up the change ✅
+
+## M11 — Music/sfx tracker + audio synth ✅
+
+- [x] `audio/sound.*`: `SfxPattern` (32 steps: pitch/wave/vol/effect + speed), `MusicPattern` (4 channels), `SoundBank`
+- [x] audio engine: 5 waveforms (square/pulse/triangle/saw/noise), click-free envelope, chromatic pitch, 4-channel + music sequencer
+- [x] Thread-safe handoff: sfx snapshot over the SPSC queue; music via an atomically-flipped SoundBank snapshot
+- [x] cart `__sfx__`/`__music__`; Lua `sfx(n[,chan])` / `music(n)` / `music(-1)`
+- [x] `editor/sfx_editor.*` (piano-roll grid + wave/vol/speed pickers + preview), `editor/music_editor.*` (4-channel arrange + transport)
+- **Acceptance**: author an sfx → preview/`sfx(0)`; arrange music → `music(0)`; round-trips ✅
+
+---
+
+## Beyond V1 (not yet)
+- Syntax highlighting + horizontal scroll in the code editor; monospaced code face
+- Sfx effects (slide/vibrato/fades) beyond the reserved slots
+- Copy/paste across sprite/map/tracker; undo
 - N-deep frames-in-flight rendering optimization
 - WASM/Web target
