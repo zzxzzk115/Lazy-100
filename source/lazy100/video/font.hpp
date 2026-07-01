@@ -11,7 +11,7 @@ namespace lazy100
     // half-width Latin and full-width 中日韩 alike.
     namespace font
     {
-        bool init(const char* ttf_path); // load the TTF; false if missing/invalid
+        bool init(); // load the built-in TTF from the embedded VFS; false if missing/invalid
         void shutdown();
 
         // Draw UTF-8 `text` top-left at (x,y) in color c; handles '\n'. Returns the x just

@@ -2,6 +2,7 @@
 
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/config.hpp"
+#include "lazy100/vfs/vfs.hpp"
 #include "lazy100/video/font.hpp"
 
 #include <chrono>
@@ -31,19 +32,10 @@ namespace lazy100
         reset_draw_pal();
         reset_transparent();
 
-        // Built-in font (runtime-rasterized). Try the project-relative path (xmake run) first.
-        static const char* const kFontPaths[] = {
-            "assets/fonts/fusion-pixel-10px-proportional-zh_hans.ttf",
-            "../assets/fonts/fusion-pixel-10px-proportional-zh_hans.ttf",
-        };
-        bool font_ok = false;
-        for (const char* path : kFontPaths)
-            if (font::init(path))
-            {
-                font_ok = true;
-                break;
-            }
-        if (!font_ok)
+        // Built-in assets are linked into the binary; mount them in the in-memory VFS, then
+        // load the font from there (runtime-rasterized). No loose files needed at runtime.
+        vfs::init();
+        if (!font::init())
             LZ_WARN("font not loaded; print() text will not render");
 
         audio_.init(); // non-fatal: sfx() is a no-op if the device can't start

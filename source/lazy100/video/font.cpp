@@ -1,13 +1,14 @@
 #include "lazy100/video/font.hpp"
 
 #include "lazy100/common/log.hpp"
+#include "lazy100/vfs/vfs.hpp"
 #include "lazy100/video/framebuffer.hpp"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
 #include <cmath>
-#include <cstdio>
+#include <cstring>
 #include <unordered_map>
 #include <vector>
 
@@ -100,24 +101,21 @@ namespace lazy100::font
         }
     } // namespace
 
-    bool init(const char* path)
+    bool init()
     {
-        std::FILE* f = std::fopen(path, "rb");
-        if (!f)
+        // Built-in font, linked into the binary and read from the in-memory VFS.
+        constexpr const char* kPath = "fonts/fusion-pixel-10px-proportional-zh_hans.ttf";
+        auto                  bytes = vfs::read_builtin(kPath);
+        if (!bytes || bytes->empty())
         {
-            LZ_ERROR("font: cannot open %s", path);
+            LZ_ERROR("font: built-in asset '%s' not available", kPath);
             return false;
         }
-        std::fseek(f, 0, SEEK_END);
-        const long sz = std::ftell(f);
-        std::fseek(f, 0, SEEK_SET);
-        g_ttf.resize(static_cast<size_t>(sz));
-        const size_t rd = std::fread(g_ttf.data(), 1, static_cast<size_t>(sz), f);
-        std::fclose(f);
-        if (rd != static_cast<size_t>(sz) ||
-            !stbtt_InitFont(&g_info, g_ttf.data(), stbtt_GetFontOffsetForIndex(g_ttf.data(), 0)))
+        g_ttf.resize(bytes->size());
+        std::memcpy(g_ttf.data(), bytes->data(), bytes->size());
+        if (!stbtt_InitFont(&g_info, g_ttf.data(), stbtt_GetFontOffsetForIndex(g_ttf.data(), 0)))
         {
-            LZ_ERROR("font: failed to parse %s", path);
+            LZ_ERROR("font: failed to parse built-in TTF");
             return false;
         }
 
@@ -131,7 +129,7 @@ namespace lazy100::font
         if (g_lineH < kPixel)
             g_lineH = kPixel + 2;
         g_ready = true;
-        LZ_INFO("font: loaded %s (%ld bytes), lineH=%d", path, sz, g_lineH);
+        LZ_INFO("font: loaded built-in TTF (%zu bytes), lineH=%d", g_ttf.size(), g_lineH);
         return true;
     }
 

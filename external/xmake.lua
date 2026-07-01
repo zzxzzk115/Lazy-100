@@ -14,6 +14,7 @@ end
 -- vri builds with the static debug CRT (MTd) only in a debug package build; follow the
 -- project mode so its _ITERATOR_DEBUG_LEVEL matches ours (avoids the IDL 0-vs-2 mismatch).
 add_requires("vri", {debug = is_mode("debug")})
+add_requires("vfilesystem", {debug = is_mode("debug")}) -- in-memory VFS for embedded assets
 add_requires("libsdl3")
 add_requires("miniaudio")
 add_requires("lua 5.4")
