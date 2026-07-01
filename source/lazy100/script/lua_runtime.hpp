@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 namespace lazy100
 {
@@ -17,8 +18,8 @@ namespace lazy100
         LuaRuntime(const LuaRuntime&)            = delete;
         LuaRuntime& operator=(const LuaRuntime&) = delete;
 
-        bool init(Console& console);     // create the VM + bind the API
-        bool load_cart(const char* path); // run a .lua file and resolve callbacks
+        bool init(Console& console);            // create the VM + bind the API
+        bool load_source(const std::string& code); // fresh VM, run the cart code, resolve callbacks
 
         void call_init();
         void call_update();

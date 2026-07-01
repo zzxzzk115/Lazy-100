@@ -15,6 +15,7 @@
 #include "lazy100/video/sprites.hpp"
 
 #include <array>
+#include <string>
 
 namespace lazy100
 {
@@ -46,7 +47,13 @@ namespace lazy100
 
         ConsoleMode mode() const { return mode_; }
         void        set_mode(ConsoleMode m) { mode_ = m; }
-        bool        start_cart(); // (re)init the loaded cart and switch to Running; false if none
+
+        // Cart lifecycle (the .lz100 format bundles code + sprite sheet).
+        std::string& code() { return code_; } // current cart's Lua source
+        bool         load_cart_file(const std::string& path); // parse .lz100/.lua -> code_ + sheet_
+        bool         save_cart_file(const std::string& path); // serialize code_ + sheet_ -> .lz100
+        void         new_cart();                              // blank code + sprite sheet
+        bool         start_cart(); // compile+init the current code and switch to Running; false if empty
 
         // pal/palt drawing state (persistent across frames, PICO-8 style).
         u8*  draw_pal() { return draw_pal_.data(); } // color remap applied on blit
@@ -70,6 +77,8 @@ namespace lazy100
 
         std::array<u8, kPaletteSize>   draw_pal_ {};
         std::array<bool, kPaletteSize> transparent_ {};
+
+        std::string code_; // current cart's Lua source (edited by the code editor)
 
         ConsoleMode mode_      = ConsoleMode::Shell;
         bool        has_cart_  = false;

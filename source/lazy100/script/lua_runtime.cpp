@@ -7,8 +7,15 @@ namespace lazy100
 {
     struct LuaRuntime::Impl
     {
+        Console*                console = nullptr;
         sol::state              lua;
         sol::protected_function init, update, update60, draw;
+
+        void open_and_bind()
+        {
+            lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::table, sol::lib::string);
+            bind_api(lua, *console);
+        }
     };
 
     LuaRuntime::LuaRuntime()  = default;
@@ -16,28 +23,32 @@ namespace lazy100
 
     bool LuaRuntime::init(Console& console)
     {
-        p_ = std::make_unique<Impl>();
-        p_->lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::table, sol::lib::string);
-        bind_api(p_->lua, console);
+        p_          = std::make_unique<Impl>();
+        p_->console = &console;
+        p_->open_and_bind();
         return true;
     }
 
-    bool LuaRuntime::load_cart(const char* path)
+    bool LuaRuntime::load_source(const std::string& code)
     {
         if (!p_)
             return false;
-        auto result = p_->lua.safe_script_file(path, sol::script_pass_on_error);
+        // Fresh VM per cart so a newly loaded cart doesn't inherit the previous one's globals.
+        p_->init = p_->update = p_->update60 = p_->draw = sol::protected_function {};
+        p_->lua                                         = sol::state {};
+        p_->open_and_bind();
+
+        auto result = p_->lua.safe_script(code, sol::script_pass_on_error);
         if (!result.valid())
         {
             sol::error err = result;
-            LZ_ERROR("cart load failed (%s): %s", path, err.what());
+            LZ_ERROR("cart error: %s", err.what());
             return false;
         }
         p_->init     = p_->lua["_init"];
         p_->update   = p_->lua["_update"];
         p_->update60 = p_->lua["_update60"];
         p_->draw     = p_->lua["_draw"];
-        LZ_INFO("cart loaded: %s", path);
         return true;
     }
 

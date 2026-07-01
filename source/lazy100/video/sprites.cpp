@@ -15,6 +15,12 @@ namespace lazy100
             px_[static_cast<u32>(y) * kSize + static_cast<u32>(x)] = index;
     }
 
+    void SpriteSheet::clear()
+    {
+        px_.fill(0);
+        flags_.fill(0);
+    }
+
     u8 SpriteSheet::flags(int n) const { return (n >= 0 && n < kSpriteCount) ? flags_[n] : 0; }
     void SpriteSheet::set_flags(int n, u8 f)
     {

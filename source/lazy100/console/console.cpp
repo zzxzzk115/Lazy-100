@@ -1,11 +1,15 @@
 #include "lazy100/console/console.hpp"
 
+#include "lazy100/cart/cart.hpp"
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/vfs/vfs.hpp"
 #include "lazy100/video/font.hpp"
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace lazy100
 {
@@ -41,13 +45,10 @@ namespace lazy100
         audio_.init(); // non-fatal: sfx() is a no-op if the device can't start
 
         lua_.init(*this);
+        new_cart();
 
-        if (cart_path && lua_.load_cart(cart_path))
-        {
-            has_cart_ = true;
-            lua_.call_init();
-            mode_ = ConsoleMode::Running; // launched with a cart -> play it
-        }
+        if (cart_path && load_cart_file(cart_path))
+            start_cart(); // launched with a cart -> play it
         else
         {
             if (cart_path)
@@ -59,11 +60,54 @@ namespace lazy100
         return true;
     }
 
+    void Console::new_cart()
+    {
+        code_.clear();
+        sheet_.clear();
+        has_cart_ = false;
+    }
+
+    bool Console::load_cart_file(const std::string& path)
+    {
+        std::ifstream f(path, std::ios::binary);
+        if (!f)
+        {
+            LZ_ERROR("cannot open cart %s", path.c_str());
+            return false;
+        }
+        std::stringstream ss;
+        ss << f.rdbuf();
+        cart::parse(ss.str(), code_, sheet_);
+        has_cart_ = !code_.empty();
+        LZ_INFO("cart loaded: %s", path.c_str());
+        return true;
+    }
+
+    bool Console::save_cart_file(const std::string& path)
+    {
+        const std::filesystem::path p(path);
+        std::error_code             ec;
+        if (p.has_parent_path())
+            std::filesystem::create_directories(p.parent_path(), ec);
+        std::ofstream f(path, std::ios::binary);
+        if (!f)
+        {
+            LZ_ERROR("cannot write cart %s", path.c_str());
+            return false;
+        }
+        f << cart::serialize(code_, sheet_);
+        LZ_INFO("cart saved: %s", path.c_str());
+        return true;
+    }
+
     bool Console::start_cart()
     {
-        if (!has_cart_)
+        if (code_.empty())
             return false;
-        lua_.call_init(); // PICO-8 behavior: `run` re-inits
+        if (!lua_.load_source(code_)) // compile from the current source; errors are logged
+            return false;
+        has_cart_ = true;
+        lua_.call_init();
         mode_ = ConsoleMode::Running;
         return true;
     }
@@ -71,12 +115,8 @@ namespace lazy100
     void Console::run()
     {
         using clock = std::chrono::steady_clock;
-
-        // Fixed logic step: 30 Hz, or 60 Hz if the cart defines _update60. Render follows
-        // vsync; the accumulator runs 0..N catch-up steps per rendered frame.
-        const double step = (has_cart_ && lua_.wants_60hz()) ? (1.0 / 60.0) : (1.0 / 30.0);
-        auto         prev = clock::now();
-        double       acc  = 0.0;
+        auto   prev = clock::now();
+        double acc  = 0.0;
 
         while (running_)
         {
@@ -102,18 +142,21 @@ namespace lazy100
             switch (mode_)
             {
                 case ConsoleMode::Running:
+                {
+                    // 30 Hz, or 60 Hz if the cart defines _update60. Fixed logic step; render
+                    // follows vsync with 0..N catch-up steps per frame.
+                    const double step = lua_.wants_60hz() ? (1.0 / 60.0) : (1.0 / 30.0);
                     acc += dt;
                     while (acc >= step)
                     {
                         input_.begin_step(); // edges + auto-repeat sampled per logic step
-                        if (has_cart_)
-                            lua_.call_update();
+                        lua_.call_update();
                         input_.end_step();
                         acc -= step;
                     }
-                    if (has_cart_)
-                        lua_.call_draw();
+                    lua_.call_draw();
                     break;
+                }
                 case ConsoleMode::Shell:
                     acc = 0.0;
                     shell_.update(*this);

@@ -26,6 +26,11 @@ namespace lazy100
         bool flag_bit(int n, int bit) const;
         void set_flag_bit(int n, int bit, bool on);
 
+        // Raw 128x128 index buffer (row-major) + flags, for cart (de)serialization.
+        u8*       pixels() { return px_.data(); }
+        const u8* pixels() const { return px_.data(); }
+        void      clear(); // zero pixels + flags (blank sheet)
+
         // Draw sprite n (a w*h block of 8px sprites) at (x,y), with optional flips.
         void spr(Framebuffer& fb, int n, int x, int y, int w, int h, bool fx, bool fy, const u8* draw_pal,
                  const bool* transp) const;

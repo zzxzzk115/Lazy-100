@@ -12,6 +12,24 @@ namespace lazy100
 {
     namespace
     {
+        // Resolve a cart name to an existing file: as-is, then carts/ and examples/carts/
+        // with a .lz100 or .lua extension.
+        std::string resolve_cart(const std::string& name)
+        {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            if (fs::exists(name, ec))
+                return name;
+            for (const char* dir : {"carts/", "examples/carts/"})
+                for (const char* ext : {".lz100", ".lua"})
+                {
+                    std::string p = std::string(dir) + name + ext;
+                    if (fs::exists(p, ec))
+                        return p;
+                }
+            return {};
+        }
+
         // Erase the last UTF-8 code point from s (handles multibyte 中日韩 input).
         void erase_last_utf8(std::string& s)
         {
@@ -64,22 +82,55 @@ namespace lazy100
         else if (cmd == "ls")
         {
             std::error_code ec;
-            const std::filesystem::path dir = "examples/carts";
-            bool                        any = false;
-            for (const auto& en : std::filesystem::directory_iterator(dir, ec))
-            {
-                const auto ext = en.path().extension().string();
-                if (ext == ".lua" || ext == ".lzz")
+            bool            any = false;
+            for (const char* dir : {"carts", "examples/carts"})
+                for (const auto& en : std::filesystem::directory_iterator(dir, ec))
                 {
-                    print_line("  " + en.path().filename().string());
-                    any = true;
+                    const auto ext = en.path().extension().string();
+                    if (ext == ".lz100" || ext == ".lua")
+                    {
+                        print_line("  " + en.path().filename().string());
+                        any = true;
+                    }
                 }
-            }
             if (!any)
-                print_line("(no carts in examples/carts)");
+                print_line("(no carts found)");
         }
-        else if (cmd == "load" || cmd == "save" || cmd == "new")
-            print_line(cmd + ": not yet (M7 cart format)");
+        else if (cmd == "new")
+        {
+            con.new_cart();
+            print_line("new cart");
+        }
+        else if (cmd == "load")
+        {
+            if (arg.empty())
+                print_line("usage: load <name>");
+            else
+            {
+                const std::string p = resolve_cart(arg);
+                if (p.empty())
+                    print_line("not found: " + arg);
+                else if (con.load_cart_file(p))
+                    print_line("loaded " + p);
+                else
+                    print_line("load failed");
+            }
+        }
+        else if (cmd == "save")
+        {
+            if (arg.empty())
+                print_line("usage: save <name>");
+            else
+            {
+                std::string p = arg;
+                if (p.find('.') == std::string::npos)
+                    p = "carts/" + arg + ".lz100";
+                if (con.save_cart_file(p))
+                    print_line("saved " + p);
+                else
+                    print_line("save failed");
+            }
+        }
         else
             print_line("unknown command: " + cmd);
     }
