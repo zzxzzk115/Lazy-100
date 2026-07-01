@@ -194,12 +194,26 @@ namespace lazy100
                              trans[fi(*c) & (kPaletteSize - 1)] = t.value_or(true);
                          });
 
-        // ---- audio (v1: square-wave beep; music is a stub) ----
-        Audio& audio = console.audio();
+        // ---- audio: sfx(n[,chan]) plays cart pattern n; music(n)/music(-1) start/stop ----
+        Audio&     audio = console.audio();
+        SoundBank& bank  = console.sounds();
         lua.set_function("sfx",
-                         [&audio](double n, sol::optional<double> /*chan*/, sol::optional<double> /*off*/)
-                         { audio.trigger_sfx(fi(n)); });
-        lua.set_function("music", [](sol::optional<double>, sol::optional<double>, sol::optional<double>) {});
+                         [&audio, &bank](double n, sol::optional<double> chan, sol::optional<double> /*off*/)
+                         {
+                             const int i = fi(n);
+                             if (i >= 0 && i < SoundBank::kSfxCount)
+                                 audio.play_sfx(bank.sfx[i], fi(chan, -1));
+                         });
+        lua.set_function("music",
+                         [&audio, &bank, &console](sol::optional<double> n, sol::optional<double>,
+                                                   sol::optional<double>)
+                         {
+                             const int i = fi(n, 0);
+                             if (i < 0)
+                                 audio.stop_music();
+                             else if (i < SoundBank::kMusicCount)
+                                 audio.play_music(i, console.sounds());
+                         });
 
         // ---- input (btn(i)/btnp(i) -> bool; no index -> bitmask) ----
         lua.set_function("btn",

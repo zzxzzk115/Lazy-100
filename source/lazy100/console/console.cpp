@@ -65,6 +65,7 @@ namespace lazy100
         code_.clear();
         sheet_.clear();
         map_.clear();
+        sounds_.clear();
         has_cart_ = false;
     }
 
@@ -78,7 +79,7 @@ namespace lazy100
         }
         std::stringstream ss;
         ss << f.rdbuf();
-        cart::parse(ss.str(), code_, sheet_, map_);
+        cart::parse(ss.str(), code_, sheet_, map_, sounds_);
         has_cart_ = !code_.empty();
         LZ_INFO("cart loaded: %s", path.c_str());
         return true;
@@ -96,7 +97,7 @@ namespace lazy100
             LZ_ERROR("cannot write cart %s", path.c_str());
             return false;
         }
-        f << cart::serialize(code_, sheet_, map_);
+        f << cart::serialize(code_, sheet_, map_, sounds_);
         LZ_INFO("cart saved: %s", path.c_str());
         return true;
     }

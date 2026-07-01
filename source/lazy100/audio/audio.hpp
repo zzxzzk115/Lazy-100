@@ -1,12 +1,16 @@
 #pragma once
 
+#include "lazy100/audio/sound.hpp"
+
 #include <memory>
 
 namespace lazy100
 {
-    // Audio output via miniaudio. v1 is a square-wave beeper: sfx() pushes a sound id onto a
-    // lock-free queue that the audio callback drains into a few voices. That queue boundary is
-    // where a real synth/tracker plugs in later. miniaudio lives entirely in audio.cpp.
+    // Audio output via miniaudio. The audio thread runs a small tracker: up to 4 channels, each
+    // stepping through an SfxPattern (5 waveforms + a click-free envelope), plus a music
+    // sequencer that chains MusicPatterns. The main/Lua thread hands work across via a lock-free
+    // queue (sfx) and an atomically-flipped SoundBank snapshot (music). miniaudio lives entirely
+    // in audio.cpp.
     class Audio
     {
     public:
@@ -19,8 +23,11 @@ namespace lazy100
         bool init();
         void shutdown();
 
-        // Trigger sound effect `n` (maps to a note). Safe to call from the main/Lua thread.
-        void trigger_sfx(int n);
+        // Play `pat` on `channel` (0..3, or -1 to auto-pick a free channel). Thread-safe.
+        void play_sfx(const SfxPattern& pat, int channel = -1);
+        // Start the music sequencer at pattern `index` using a snapshot of `bank`. Thread-safe.
+        void play_music(int index, const SoundBank& bank);
+        void stop_music(); // silence the music sequencer
 
     private:
         struct Impl;

@@ -45,6 +45,7 @@ namespace lazy100
         Mouse&       mouse() { return mouse_; }
         SpriteSheet& sheet() { return sheet_; }
         Map&         map() { return map_; }
+        SoundBank&   sounds() { return sounds_; }
         Audio&       audio() { return audio_; }
 
         ConsoleMode mode() const { return mode_; }
@@ -74,6 +75,7 @@ namespace lazy100
         Mouse       mouse_;
         SpriteSheet sheet_;
         Map         map_;
+        SoundBank   sounds_;
         Audio       audio_;
         LuaRuntime  lua_;
         Shell       shell_;

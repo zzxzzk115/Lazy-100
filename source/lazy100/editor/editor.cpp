@@ -4,6 +4,8 @@
 #include "lazy100/console/config.hpp"
 #include "lazy100/editor/code_editor.hpp"
 #include "lazy100/editor/map_editor.hpp"
+#include "lazy100/editor/music_editor.hpp"
+#include "lazy100/editor/sfx_editor.hpp"
 #include "lazy100/editor/sprite_editor.hpp"
 #include "lazy100/input/mouse.hpp"
 #include "lazy100/video/font.hpp"
@@ -32,8 +34,8 @@ namespace lazy100
         editors_.push_back(std::make_unique<CodeEditor>());
         editors_.push_back(std::make_unique<SpriteEditor>());
         editors_.push_back(std::make_unique<MapEditor>());
-        editors_.push_back(std::make_unique<PlaceholderEditor>("SFX"));
-        editors_.push_back(std::make_unique<PlaceholderEditor>("MUSIC"));
+        editors_.push_back(std::make_unique<SfxEditor>());
+        editors_.push_back(std::make_unique<MusicEditor>());
     }
 
     void EditorHost::set_current(int i)

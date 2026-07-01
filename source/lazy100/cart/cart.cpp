@@ -1,9 +1,11 @@
 #include "lazy100/cart/cart.hpp"
 
+#include "lazy100/audio/sound.hpp"
 #include "lazy100/video/sprites.hpp"
 #include "lazy100/world/map.hpp"
 
 #include <sstream>
+#include <vector>
 
 namespace lazy100::cart
 {
@@ -33,15 +35,37 @@ namespace lazy100::cart
                 return line.substr(2, line.size() - 4);
             return {};
         }
+
+        // Decode a run of hex chars into bytes (ignores stray non-hex).
+        std::vector<u8> hex_to_bytes(const std::string& hex)
+        {
+            std::vector<u8> out;
+            out.reserve(hex.size() / 2);
+            for (size_t i = 0; i + 1 < hex.size(); i += 2)
+            {
+                const int hi = hex_val(hex[i]);
+                const int lo = hex_val(hex[i + 1]);
+                if (hi >= 0 && lo >= 0)
+                    out.push_back(static_cast<u8>((hi << 4) | lo));
+            }
+            return out;
+        }
+
+        void put_byte(std::string& out, u8 v)
+        {
+            out += hex_digit(v >> 4);
+            out += hex_digit(v & 0xf);
+        }
     } // namespace
 
-    bool parse(const std::string& text, std::string& code, SpriteSheet& sheet, Map& map)
+    bool parse(const std::string& text, std::string& code, SpriteSheet& sheet, Map& map, SoundBank& bank)
     {
         code.clear();
         sheet.clear();
         map.clear();
+        bank.clear();
 
-        std::string gfxHex, gffHex, mapHex;
+        std::string gfxHex, gffHex, mapHex, sfxHex, musicHex;
         bool        sawSection = false;
 
         enum class Sec
@@ -50,7 +74,9 @@ namespace lazy100::cart
             Lua,
             Gfx,
             Gff,
-            Map
+            Map,
+            Sfx,
+            Music
         } sec = Sec::None;
 
         std::istringstream ss(text);
@@ -64,11 +90,13 @@ namespace lazy100::cart
             if (!name.empty())
             {
                 sawSection = true;
-                sec        = name == "lua"   ? Sec::Lua
-                             : name == "gfx" ? Sec::Gfx
-                             : name == "gff" ? Sec::Gff
-                             : name == "map" ? Sec::Map
-                                             : Sec::None; // sfx/music etc. skipped for now
+                sec        = name == "lua"     ? Sec::Lua
+                             : name == "gfx"   ? Sec::Gfx
+                             : name == "gff"   ? Sec::Gff
+                             : name == "map"   ? Sec::Map
+                             : name == "sfx"   ? Sec::Sfx
+                             : name == "music" ? Sec::Music
+                                               : Sec::None; // unknown sections skipped
                 continue;
             }
 
@@ -81,6 +109,8 @@ namespace lazy100::cart
                 case Sec::Gfx: gfxHex += line; break;
                 case Sec::Gff: gffHex += line; break;
                 case Sec::Map: mapHex += line; break;
+                case Sec::Sfx: sfxHex += line; break;
+                case Sec::Music: musicHex += line; break;
                 case Sec::None: break; // header lines / unknown sections
             }
         }
@@ -112,10 +142,42 @@ namespace lazy100::cart
             if (hi >= 0 && lo >= 0)
                 tiles[t] = static_cast<u8>((hi << 4) | lo);
         }
+
+        // __sfx__: 65 bytes per pattern (speed + 32 notes * 2 bytes: pitch, wave|vol<<3|effect<<6).
+        {
+            const std::vector<u8> b   = hex_to_bytes(sfxHex);
+            constexpr size_t      rec = 1 + SfxPattern::kSteps * 2;
+            for (size_t s = 0; s < SoundBank::kSfxCount && (s + 1) * rec <= b.size(); ++s)
+            {
+                SfxPattern&  pat  = bank.sfx[s];
+                const u8*    r    = &b[s * rec];
+                pat.speed         = r[0] ? r[0] : 1;
+                for (int n = 0; n < SfxPattern::kSteps; ++n)
+                {
+                    const u8 pitch  = r[1 + n * 2];
+                    const u8 packed = r[2 + n * 2];
+                    pat.notes[n]    = {pitch, static_cast<u8>(packed & 0x7), static_cast<u8>((packed >> 3) & 0x7),
+                                       static_cast<u8>((packed >> 6) & 0x3)};
+                }
+            }
+        }
+        // __music__: 5 bytes per pattern (flags + 4 channel sfx indices).
+        {
+            const std::vector<u8> b   = hex_to_bytes(musicHex);
+            constexpr size_t      rec = 1 + MusicPattern::kChannels;
+            for (size_t m = 0; m < SoundBank::kMusicCount && (m + 1) * rec <= b.size(); ++m)
+            {
+                MusicPattern& mp = bank.music[m];
+                const u8*     r  = &b[m * rec];
+                mp.flags         = r[0];
+                for (int c = 0; c < MusicPattern::kChannels; ++c)
+                    mp.sfx[c] = r[1 + c];
+            }
+        }
         return true;
     }
 
-    std::string serialize(const std::string& code, const SpriteSheet& sheet, const Map& map)
+    std::string serialize(const std::string& code, const SpriteSheet& sheet, const Map& map, const SoundBank& bank)
     {
         std::string out;
         out.reserve(static_cast<size_t>(kSheet) * kSheet * 2 + static_cast<size_t>(Map::kW) * Map::kH * 2 +
@@ -160,6 +222,29 @@ namespace lazy100::cart
                 out += hex_digit(v >> 4);
                 out += hex_digit(v & 0xf);
             }
+            out += '\n';
+        }
+
+        out += "__sfx__\n";
+        for (int s = 0; s < SoundBank::kSfxCount; ++s)
+        {
+            const SfxPattern& pat = bank.sfx[s];
+            put_byte(out, pat.speed);
+            for (const SfxNote& note : pat.notes)
+            {
+                put_byte(out, note.pitch);
+                put_byte(out, static_cast<u8>((note.wave & 0x7) | ((note.vol & 0x7) << 3) | ((note.effect & 0x3) << 6)));
+            }
+            out += '\n';
+        }
+
+        out += "__music__\n";
+        for (int m = 0; m < SoundBank::kMusicCount; ++m)
+        {
+            const MusicPattern& mp = bank.music[m];
+            put_byte(out, mp.flags);
+            for (u8 idx : mp.sfx)
+                put_byte(out, idx);
             out += '\n';
         }
         return out;
