@@ -2,13 +2,13 @@
 //
 // A no-vertex-buffer full-screen triangle samples the R8_UINT index framebuffer with an
 // integer texel fetch (.Load, so no sampler is needed) and looks the index up in the
-// 32-entry palette. The palette lives in a constant buffer as uint4[8] (tight 128 bytes;
-// a `uint colors[32]` would get 16-byte HLSL cbuffer array stride and not match the
-// 32-contiguous-uint upload from the CPU).
+// 256-entry palette. The palette lives in a constant buffer as uint4[64] (tight 1024 bytes;
+// a `uint colors[256]` would get 16-byte HLSL cbuffer array stride and not match the
+// 256-contiguous-uint upload from the CPU).
 
 struct Palette
 {
-    uint4 colors[8]; // 32 RGBA8-packed entries (r | g<<8 | b<<16 | a<<24), 4 per row
+    uint4 colors[64]; // 256 RGBA8-packed entries (r | g<<8 | b<<16 | a<<24), 4 per row
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Palette> uPalette;

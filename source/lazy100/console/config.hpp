@@ -8,8 +8,9 @@ namespace lazy100
     inline constexpr std::uint32_t kScreenW = 320;
     inline constexpr std::uint32_t kScreenH = 240;
 
-    // Palette entries. Indices stored in the framebuffer are 0..kPaletteSize-1.
-    inline constexpr std::uint32_t kPaletteSize = 32;
+    // Palette entries: a full 256-color VGA-class palette (the framebuffer stores a u8 index
+    // per pixel, so 256 is the natural ceiling). Indices are 0..kPaletteSize-1.
+    inline constexpr std::uint32_t kPaletteSize = 256;
 
     // Logic update rate (carts that define _update60 run at 60). Render follows vsync.
     inline constexpr std::uint32_t kTargetFps = 30;

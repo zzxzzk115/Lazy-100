@@ -24,7 +24,7 @@ See [DESIGN.md](DESIGN.md) for details.
 
 ## M1 — Framebuffer On-Screen (retire GPU risk) ✅
 
-- [x] `video/palette.*`: 32-entry RGBA8 default palette (PICO-8 16 + extended 16)
+- [x] `video/palette.*`: 256-entry RGBA8 default palette (32 curated + 6×6×6 color cube + grayscale ramp)
 - [x] `video/framebuffer.*`: 320×240 uint8 index buffer + `cls/pset/rectfill`
 - [x] `gpu/shaders/present.slang`: full-screen-triangle VS + palette-resolve PS; generated `present_spv.h` with the prebuilt `vri-shaderc`
 - [x] `present.*`: R8_UINT index texture + staging-ring upload + palette uniform + full-screen triangle (texelFetch `.Load`, so **no sampler** needed)
@@ -60,7 +60,7 @@ See [DESIGN.md](DESIGN.md) for details.
 
 ## M4 — Sprites + Font ✅
 
-- [x] `video/sprites.*`: 128×128 index sprite sheet + `spr`/`sspr`/`sget`/`sset`/`fget`/`fset`, flip
+- [x] `video/sprites.*`: 256×256 index sprite sheet (16×16 grid of 16px sprites) + `spr`/`sspr`/`sget`/`sset`/`fget`/`fset`, flip
 - [x] `pal`/`palt` transparency (index 0 transparent by default) + draw/screen palette remap
 - [x] Bind spr/sspr/sget/sset/fget/fset/pal/palt
 - [x] Sprite data source: `sset()` from Lua (side-car PNG load deferred)

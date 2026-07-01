@@ -1,9 +1,21 @@
 # Lazy-100
 
-A **fantasy game console** in the spirit of PICO-8 / TIC-80 / basic8, but at a readable
-**320×240** resolution and scripted in **Lua 5.4**. It stands on the shoulders of
+A **fantasy game console** in the spirit of PICO-8 / TIC-80 / basic8, but a notch more
+capable: a readable **320×240** screen, a **256-color** palette, **16×16** sprites, and
+scripting in **Lua 5.4**. It stands on the shoulders of
 [VRI](https://github.com/zzxzzk115/VRI), a cross-backend Render Hardware Interface
 (Vulkan / D3D12 / Metal / WebGPU / OpenGL / OpenGL ES / WebGL).
+
+## Specs
+
+| | |
+|---|---|
+| Screen | 320×240, indexed (1 byte/pixel) |
+| Palette | 256 colors (fully re-definable) |
+| Sprites | 16×16 px, 16×16 sheet = 256 sprites (256×256 px) |
+| Map | 128×64 tiles |
+| Script | Lua 5.4 (sol2) |
+| Cart | single `.lz100` text file (code + gfx + flags + map + audio) |
 
 ## Stack
 
@@ -24,9 +36,10 @@ xmake run lazy100 [cart.lua or cart.lz100]
 ## Status
 
 Under construction — see [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
-[docs/TODO.md](docs/TODO.md) for the milestone plan. Currently at **M0** (boot + present
-backbone: a window comes up driven by VRI through SDL3). 中文文档见
-[docs/zh_CN/](docs/zh_CN/).
+[docs/TODO.md](docs/TODO.md) for the milestone plan. The runtime kernel (boot, indexed
+framebuffer, Lua drawing/font, input, sprites, audio) and the first slice of the in-console
+editor suite — command-line shell, `.lz100` cart load/save, and the sprite editor — are in
+place; the map, code, and music-tracker editors are next. 中文文档见 [docs/zh_CN/](docs/zh_CN/).
 
 ## Credits
 

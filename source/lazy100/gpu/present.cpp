@@ -199,7 +199,7 @@ namespace lazy100
 
         // ---- palette uniform (host-visible) ----
         VriBufferDesc pbd {};
-        pbd.size           = Palette::size() * sizeof(u32); // 128 bytes
+        pbd.size           = Palette::size() * sizeof(u32); // 256 entries -> 1024 bytes
         pbd.usage          = VriBufferUsage_ConstantBuffer;
         pbd.memoryLocation = VriMemoryLocation_HostUpload;
         if (im.c.CreateBuffer(im.dev, &pbd, &im.paletteBuf) != VriResult_Success)

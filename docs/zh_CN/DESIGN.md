@@ -35,11 +35,11 @@ source/lazy100/
     types.hpp        固定宽度别名、Color32、Rect、小型数学、LZ_ASSERT
     log.hpp          日志；同时作为 VRI MessageCallback 的接收端
   video/             —— 确定性、可 headless 单测；无 SDL/VRI/Lua 依赖
-    palette.*        32 项 RGBA8 调色板（默认 PICO-8 风格），set/get/reset
+    palette.*        256 项 RGBA8 调色板（32 精选 + 色立方默认），set/get/reset
     framebuffer.*    320×240 uint8 索引缓冲 + clip 矩形 + camera 偏移
     draw.*           cls/pset/pget/line/rect/rectfill/circ/circfill/clip
     font.*           1bpp 位图字形表（ASCII 32..126），print() 光栅化
-    sprites.*        精灵表（128×128 索引 = 16×16 个 8px 精灵），spr()/sspr()
+    sprites.*        精灵表（256×256 索引 = 16×16 个 16px 精灵），spr()/sspr()
     blit.hpp         内联 span/pixel 助手（clip + 透明索引处理）
   gpu/               —— 唯一触碰 VRI 的层
     present.*        VRI device+swapchain 持有者；上传索引纹理 + 全屏调色板解析
@@ -133,15 +133,15 @@ present.submit_frame(fb, pal):
 
 ## 5. 像素格式：上传 R8_UINT 索引纹理 + 片元着色器查调色板
 
-**结论：采用方案 (b)** —— 上传 `R8_UINT` 索引纹理，在片元着色器里用 32 项调色板 uniform 解析颜色。**不**在 CPU 端逐帧展开成 RGBA8。
+**结论：采用方案 (b)** —— 上传 `R8_UINT` 索引纹理，在片元着色器里用 256 项调色板 uniform 解析颜色。**不**在 CPU 端逐帧展开成 RGBA8。（`R8_UINT` 恰好可寻址 256 个索引，因此调色板天然封顶 256，无需改纹理格式。）
 
 - 索引纹理：`VriTextureDesc{ 2D, R8_UINT, 320×240, usage=ShaderResource|copy-dst, Device }`。CPU framebuffer 正好是 `uint8_t[320*240]`（75 KB），memcpy 进 HostUpload staging，再 `CmdUploadBufferToTexture`。
-- 调色板：32 项作为 **constant buffer**（`uint32 palette[32]` RGBA8 打包），CBV 绑定，仅 `dirty` 时更新（通常零成本）。
+- 调色板：256 项作为 **constant buffer**（`uint32 palette[256]` RGBA8 打包，以 `uint4[64]` 上传以对齐 16 字节 cbuffer 步幅），CBV 绑定，仅 `dirty` 时更新（通常零成本）。
 - 片元着色器：`Texture2D<uint>` 用 `.Load(int3(p,0))` texelFetch（整数纹理不可线性过滤，正好配最近邻放大），`palette[idx]` 输出 RGBA。
 
 **理由（对比方案 a：CPU 逐帧展开 index→RGBA8）**
 - **带宽**：75 KB/帧 vs 300 KB/帧——省 4×。
-- **调色板特效几乎免费**：`pal()` 替换、调色板循环、淡入淡出、闪屏 = 改 32 项 uniform，而非重写 76800 像素。这正是 fantasy console 的惯用语，也是方案 (a) 的痛点。
+- **调色板特效几乎免费**：`pal()` 替换、调色板循环、淡入淡出、闪屏 = 改 256 项 uniform，而非重写 76800 像素。这正是 fantasy console 的惯用语，也是方案 (a) 的痛点。
 - **CPU 保持廉价**：光栅器永远只写 1 字节/像素。
 
 **已处理的坑**：boot 时 `GetFormatSupport(R8_UINT)` 校验；若某后端不支持采样整数纹理，回退 `R8_UNORM` + `round(s*255)`，改动隔离在 `present.slang` + 一个格式常量。
@@ -150,7 +150,7 @@ present.submit_frame(fb, pal):
 
 ## 6. Lua API（v1）
 
-全局自由函数（PICO-8 惯例：cart 调 `pset(...)` 而非 `lz.pset(...)`）。颜色 = 调色板索引 `0..31`。
+全局自由函数（PICO-8 惯例：cart 调 `pset(...)` 而非 `lz.pset(...)`）。颜色 = 调色板索引 `0..255`。
 
 ```text
 -- 生命周期（cart 定义，内核调用）
@@ -232,7 +232,7 @@ struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
     VSOut o; o.uv = uv; o.pos = float4(uv*2-1, 0, 1); return o;
 }
 Texture2D<uint> gIndex : register(t0);              // R8_UINT 320×240
-cbuffer Palette : register(b0) { uint gPal[32]; };  // RGBA8 打包
+cbuffer Palette : register(b0) { uint gPal[256]; }; // RGBA8 打包
 [shader("fragment")] float4 fragmentMain(VSOut i) : SV_Target {
     int2 p = int2(i.uv * float2(320,240));
     uint c = gPal[ gIndex.Load(int3(p,0)) ];

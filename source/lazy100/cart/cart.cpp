@@ -8,8 +8,8 @@ namespace lazy100::cart
 {
     namespace
     {
-        constexpr int kSheet = SpriteSheet::kSize;   // 128
-        constexpr int kFlags = SpriteSheet::kSpriteCount; // 256
+        constexpr int kSheet = SpriteSheet::kSize;        // 256 (px per side)
+        constexpr int kFlags = SpriteSheet::kSpriteCount; // 256 sprites
 
         char hex_digit(int v) { return static_cast<char>(v < 10 ? '0' + v : 'a' + (v - 10)); }
 

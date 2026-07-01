@@ -46,10 +46,10 @@ namespace lazy100
     {
         if (n < 0)
             return;
-        const int ox = (n % kSpritesPerRow) * 8;
-        const int oy = (n / kSpritesPerRow) * 8;
-        const int sw = w * 8;
-        const int sh = h * 8;
+        const int ox = (n % kSpritesPerRow) * kSpriteSize;
+        const int oy = (n / kSpritesPerRow) * kSpriteSize;
+        const int sw = w * kSpriteSize;
+        const int sh = h * kSpriteSize;
         for (int j = 0; j < sh; ++j)
             for (int i = 0; i < sw; ++i)
             {

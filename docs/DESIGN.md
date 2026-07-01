@@ -35,11 +35,11 @@ source/lazy100/
     types.hpp        Fixed-width aliases, Color32, Rect, small math, LZ_ASSERT
     log.hpp          Logging; also the sink for VRI's MessageCallback
   video/             —— Deterministic, headless-unit-testable; no SDL/VRI/Lua deps
-    palette.*        32-entry RGBA8 palette (default PICO-8 style), set/get/reset
+    palette.*        256-entry RGBA8 palette (32 curated + color-cube default), set/get/reset
     framebuffer.*    320×240 uint8 index buffer + clip rect + camera offset
     draw.*           cls/pset/pget/line/rect/rectfill/circ/circfill/clip
     font.*           1bpp bitmap glyph table (ASCII 32..126), print() rasterization
-    sprites.*        Sprite sheet (128×128 indices = 16×16 of 8px sprites), spr()/sspr()
+    sprites.*        Sprite sheet (256×256 indices = 16×16 of 16px sprites), spr()/sspr()
     blit.hpp         Inline span/pixel helpers (clip + transparent-index handling)
   gpu/               —— The only layer that touches VRI
     present.*        VRI device+swapchain owner; uploads index texture + full-screen palette resolve
@@ -102,7 +102,7 @@ Aligned with `VRI/examples/common/example_app.h`: acquire → barrier → upload
 
 ```text
 present.submit_frame(fb, pal):
-  if pal.dirty: map paletteBuf; memcpy 32×RGBA8; unmap; dirty=false
+  if pal.dirty: map paletteBuf; memcpy 256×RGBA8; unmap; dirty=false
   memcpy(MapBuffer(stagingRing[frame%N]), fb.pixels(), 320*240); UnmapBuffer
 
   AcquireNextTexture(swapchain, &index)        # handle OutOfDate → swap.Resize and skip
@@ -133,15 +133,15 @@ Keep an N=image-count staging **ring buffer** to avoid per-frame reallocation.
 
 ## 5. Pixel Format: Upload an R8_UINT Index Texture + Resolve the Palette in the Fragment Shader
 
-**Conclusion: take option (b)** — upload an `R8_UINT` index texture and resolve the color in the fragment shader using a 32-entry palette uniform. Do **not** expand to RGBA8 on the CPU every frame.
+**Conclusion: take option (b)** — upload an `R8_UINT` index texture and resolve the color in the fragment shader using a 256-entry palette uniform. Do **not** expand to RGBA8 on the CPU every frame. (`R8_UINT` addresses a full 256 indices, so it caps the palette at exactly 256 with no format change.)
 
 - Index texture: `VriTextureDesc{ 2D, R8_UINT, 320×240, usage=ShaderResource|copy-dst, Device }`. The CPU framebuffer is exactly `uint8_t[320*240]` (75 KB), memcpy'd into HostUpload staging, then `CmdUploadBufferToTexture`.
-- Palette: 32 entries as a **constant buffer** (`uint32 palette[32]` RGBA8 packed), bound as a CBV, updated only when `dirty` (usually zero-cost).
+- Palette: 256 entries as a **constant buffer** (`uint32 palette[256]` RGBA8 packed, uploaded as `uint4[64]` for tight 16-byte cbuffer stride), bound as a CBV, updated only when `dirty` (usually zero-cost).
 - Fragment shader: `Texture2D<uint>` uses `.Load(int3(p,0))` texelFetch (integer textures cannot be linearly filtered — which pairs perfectly with nearest-neighbor upscaling), and outputs `palette[idx]` as RGBA.
 
 **Rationale (vs option a: CPU-side per-frame index→RGBA8 expansion)**
 - **Bandwidth**: 75 KB/frame vs 300 KB/frame — 4× savings.
-- **Palette effects are nearly free**: `pal()` swaps, palette cycling, fades, screen flashes = changing 32 uniform entries, rather than rewriting 76800 pixels. This is exactly the fantasy-console idiom, and exactly the pain point of option (a).
+- **Palette effects are nearly free**: `pal()` swaps, palette cycling, fades, screen flashes = changing 256 uniform entries, rather than rewriting 76800 pixels. This is exactly the fantasy-console idiom, and exactly the pain point of option (a).
 - **CPU stays cheap**: the rasterizer always writes just 1 byte/pixel.
 
 **Pitfall handled**: validate `GetFormatSupport(R8_UINT)` at boot; if a backend cannot sample integer textures, fall back to `R8_UNORM` + `round(s*255)`, with the change isolated to `present.slang` + one format constant.
@@ -150,7 +150,7 @@ Keep an N=image-count staging **ring buffer** to avoid per-frame reallocation.
 
 ## 6. Lua API (v1)
 
-Global free functions (PICO-8 convention: a cart calls `pset(...)`, not `lz.pset(...)`). Colors = palette indices `0..31`.
+Global free functions (PICO-8 convention: a cart calls `pset(...)`, not `lz.pset(...)`). Colors = palette indices `0..255`.
 
 ```text
 -- Lifecycle (defined by cart, called by kernel)
@@ -232,7 +232,7 @@ struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
     VSOut o; o.uv = uv; o.pos = float4(uv*2-1, 0, 1); return o;
 }
 Texture2D<uint> gIndex : register(t0);              // R8_UINT 320×240
-cbuffer Palette : register(b0) { uint gPal[32]; };  // RGBA8 packed
+cbuffer Palette : register(b0) { uint gPal[256]; }; // RGBA8 packed
 [shader("fragment")] float4 fragmentMain(VSOut i) : SV_Target {
     int2 p = int2(i.uv * float2(320,240));
     uint c = gPal[ gIndex.Load(int3(p,0)) ];

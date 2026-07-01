@@ -21,7 +21,7 @@ M0/M1 在搭 Lua/玩法层之前先消除 VRI 集成与 GPU 风险。
 
 ## M1 — Framebuffer 上屏（消除 GPU 风险）
 
-- [ ] `video/palette.*`：32 项 RGBA8 默认调色板
+- [ ] `video/palette.*`：256 项 RGBA8 默认调色板（32 精选 + 6×6×6 色立方 + 灰阶）
 - [ ] `video/framebuffer.*`：320×240 uint8 索引缓冲 + `cls/pset/rectfill`
 - [ ] `gpu/shaders/present.slang`：全屏三角 VS + 调色板解析 PS；用 `vri-shaderc` 生成 `present_spv.h`（+ 按需 `_dxbc.h`）
 - [ ] `present.*`：R8_UINT 索引纹理 + staging 环上传 + 调色板 CBV + NEAREST sampler + 全屏 quad
@@ -50,7 +50,7 @@ M0/M1 在搭 Lua/玩法层之前先消除 VRI 集成与 GPU 风险。
 
 ## M4 — 精灵 + 字体
 
-- [ ] `video/sprites.*`：128×128 索引精灵表 + `spr`/`sspr`/`sget`/`sset`，flip
+- [ ] `video/sprites.*`：256×256 索引精灵表（16×16 个 16px 精灵）+ `spr`/`sspr`/`sget`/`sset`，flip
 - [ ] `pal`/`palt` 透明（默认索引 0 透明）
 - [ ] 绑定 spr/sspr/sget/sset/fget/fset/pal/palt
 - [ ] 精灵数据来源：sset() 或旁挂索引 PNG 加载
