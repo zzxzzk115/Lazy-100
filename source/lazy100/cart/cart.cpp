@@ -58,14 +58,16 @@ namespace lazy100::cart
         }
     } // namespace
 
-    bool parse(const std::string& text, std::string& code, SpriteSheet& sheet, Map& map, SoundBank& bank)
+    bool parse(const std::string& text, std::string& code, SpriteSheet& sheet, Map& map, SoundBank& bank,
+               CartLabel& label)
     {
         code.clear();
         sheet.clear();
         map.clear();
         bank.clear();
+        label.clear();
 
-        std::string gfxHex, gffHex, mapHex, sfxHex, musicHex;
+        std::string gfxHex, gffHex, mapHex, sfxHex, musicHex, labelHex;
         bool        sawSection = false;
 
         enum class Sec
@@ -76,7 +78,8 @@ namespace lazy100::cart
             Gff,
             Map,
             Sfx,
-            Music
+            Music,
+            Label
         } sec = Sec::None;
 
         std::istringstream ss(text);
@@ -96,6 +99,7 @@ namespace lazy100::cart
                              : name == "map"   ? Sec::Map
                              : name == "sfx"   ? Sec::Sfx
                              : name == "music" ? Sec::Music
+                             : name == "label" ? Sec::Label
                                                : Sec::None; // unknown sections skipped
                 continue;
             }
@@ -111,6 +115,7 @@ namespace lazy100::cart
                 case Sec::Map: mapHex += line; break;
                 case Sec::Sfx: sfxHex += line; break;
                 case Sec::Music: musicHex += line; break;
+                case Sec::Label: labelHex += line; break;
                 case Sec::None: break; // header lines / unknown sections
             }
         }
@@ -174,10 +179,24 @@ namespace lazy100::cart
                     mp.sfx[c] = r[1 + c];
             }
         }
+        // __label__: 160x120 indexed thumbnail (present only if the section carried data).
+        if (!labelHex.empty())
+        {
+            constexpr size_t n = static_cast<size_t>(CartLabel::kW) * CartLabel::kH;
+            for (size_t i = 0, p = 0; i + 1 < labelHex.size() && p < n; i += 2, ++p)
+            {
+                const int hi = hex_val(labelHex[i]);
+                const int lo = hex_val(labelHex[i + 1]);
+                if (hi >= 0 && lo >= 0)
+                    label.px[p] = static_cast<u8>((hi << 4) | lo);
+            }
+            label.present = true;
+        }
         return true;
     }
 
-    std::string serialize(const std::string& code, const SpriteSheet& sheet, const Map& map, const SoundBank& bank)
+    std::string serialize(const std::string& code, const SpriteSheet& sheet, const Map& map, const SoundBank& bank,
+                          const CartLabel& label)
     {
         std::string out;
         out.reserve(static_cast<size_t>(kSheet) * kSheet * 2 + static_cast<size_t>(Map::kW) * Map::kH * 2 +
@@ -246,6 +265,18 @@ namespace lazy100::cart
             for (u8 idx : mp.sfx)
                 put_byte(out, idx);
             out += '\n';
+        }
+
+        // __label__ only when a thumbnail has been captured (keeps label-less carts compact).
+        if (label.present)
+        {
+            out += "__label__\n";
+            for (int y = 0; y < CartLabel::kH; ++y)
+            {
+                for (int x = 0; x < CartLabel::kW; ++x)
+                    put_byte(out, label.px[static_cast<size_t>(y) * CartLabel::kW + x]);
+                out += '\n';
+            }
         }
         return out;
     }

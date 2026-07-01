@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lazy100/audio/audio.hpp"
+#include "lazy100/cart/label.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/window.hpp"
 #include "lazy100/editor/editor.hpp"
@@ -64,6 +65,7 @@ namespace lazy100
         bool         save_cart_file(const std::string& path); // serialize code_ + sheet_ -> .lz100
         void         new_cart();                              // blank code + sprite sheet
         bool         start_cart(); // compile+init the current code and switch to Running; false if empty
+        void         capture_label(); // snapshot the framebuffer as the cart's 160x120 thumbnail (Ctrl+7)
 
         // pal/palt drawing state (persistent across frames, PICO-8 style).
         u8*  draw_pal() { return draw_pal_.data(); } // color remap applied on blit
@@ -90,7 +92,8 @@ namespace lazy100
         std::array<u8, kPaletteSize>   draw_pal_ {};
         std::array<bool, kPaletteSize> transparent_ {};
 
-        std::string code_; // current cart's Lua source (edited by the code editor)
+        std::string code_;  // current cart's Lua source (edited by the code editor)
+        CartLabel   label_; // captured thumbnail for the cart PNG (__label__ section)
 
         ConsoleMode mode_      = ConsoleMode::Shell;
         bool        has_cart_  = false;

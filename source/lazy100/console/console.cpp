@@ -1,6 +1,7 @@
 #include "lazy100/console/console.hpp"
 
 #include "lazy100/cart/cart.hpp"
+#include "lazy100/cart/cartpng.hpp"
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/boot.hpp"
 #include "lazy100/console/config.hpp"
@@ -72,11 +73,32 @@ namespace lazy100
         sheet_.clear();
         map_.clear();
         sounds_.clear();
+        label_.clear();
         has_cart_ = false;
+    }
+
+    void Console::capture_label()
+    {
+        // Snapshot the framebuffer at full 320x240 resolution (no downscale -> stays crisp).
+        for (int y = 0; y < CartLabel::kH; ++y)
+            for (int x = 0; x < CartLabel::kW; ++x)
+                label_.px[static_cast<size_t>(y) * CartLabel::kW + x] = framebuffer_.pget(x, y);
+        label_.present = true;
+        LZ_INFO("cart label captured");
     }
 
     bool Console::load_cart_file(const std::string& path)
     {
+        if (path.ends_with(".png")) // a cart PNG: extract the hidden .lz100 text, then parse it
+        {
+            std::string text;
+            if (!cartpng::load(path, text))
+                return false;
+            cart::parse(text, code_, sheet_, map_, sounds_, label_);
+            has_cart_ = !code_.empty();
+            LZ_INFO("cart loaded (png): %s", path.c_str());
+            return true;
+        }
         std::ifstream f(path, std::ios::binary);
         if (!f)
         {
@@ -85,7 +107,7 @@ namespace lazy100
         }
         std::stringstream ss;
         ss << f.rdbuf();
-        cart::parse(ss.str(), code_, sheet_, map_, sounds_);
+        cart::parse(ss.str(), code_, sheet_, map_, sounds_, label_);
         has_cart_ = !code_.empty();
         LZ_INFO("cart loaded: %s", path.c_str());
         return true;
@@ -97,13 +119,23 @@ namespace lazy100
         std::error_code             ec;
         if (p.has_parent_path())
             std::filesystem::create_directories(p.parent_path(), ec);
+        if (path.ends_with(".png")) // export as a cart PNG (visible cover + hidden cart data)
+        {
+            // The label is drawn on the cover but NOT hidden in the payload: a full-res screenshot
+            // barely compresses and would make the PNG very tall. So embed the cart without it.
+            if (!cartpng::save(path, cart::serialize(code_, sheet_, map_, sounds_, CartLabel {}), label_, sheet_,
+                               palette_))
+                return false;
+            LZ_INFO("cart saved (png): %s", path.c_str());
+            return true;
+        }
         std::ofstream f(path, std::ios::binary);
         if (!f)
         {
             LZ_ERROR("cannot write cart %s", path.c_str());
             return false;
         }
-        f << cart::serialize(code_, sheet_, map_, sounds_);
+        f << cart::serialize(code_, sheet_, map_, sounds_, label_);
         LZ_INFO("cart saved: %s", path.c_str());
         return true;
     }
@@ -203,6 +235,8 @@ namespace lazy100
                         acc -= step;
                     }
                     lua_.call_draw();
+                    if (keyboard_.ctrl() && keyboard_.pressed(Keyboard::Num7))
+                        capture_label(); // Ctrl+7: snapshot this frame as the cart thumbnail
                     break;
                 }
                 case ConsoleMode::Shell:

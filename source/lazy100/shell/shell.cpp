@@ -94,7 +94,10 @@ namespace lazy100
             return;
 
         if (cmd == "help")
+        {
             print_line("commands: help ls cd pwd cls run edit load save new exit");
+            print_line("save foo.png / load foo.png: cart as a shareable image");
+        }
         else if (cmd == "cls")
             lines_.clear();
         else if (cmd == "exit" || cmd == "quit")
@@ -155,7 +158,7 @@ namespace lazy100
             }
             std::error_code          ec;
             std::string              found;
-            for (const std::string& cand : {arg, arg + ".lz100", arg + ".lua"})
+            for (const std::string& cand : {arg, arg + ".lz100", arg + ".png", arg + ".lua"})
             {
                 const fs::path p = fs::path(cwd_) / cand;
                 if (fs::exists(p, ec))

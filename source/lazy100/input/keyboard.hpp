@@ -30,6 +30,7 @@ namespace lazy100
             End,
             PageUp,
             PageDown,
+            Num7, // for the Ctrl+7 "capture cart label" shortcut
             Count
         };
 
