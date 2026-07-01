@@ -6,28 +6,31 @@
 #include "lazy100/video/font.hpp"
 #include "lazy100/video/framebuffer.hpp"
 
+#include <algorithm>
 #include <filesystem>
 
 namespace lazy100
 {
     namespace
     {
-        // Resolve a cart name to an existing file: as-is, then carts/ and examples/carts/
-        // with a .lz100 or .lua extension.
-        std::string resolve_cart(const std::string& name)
+        namespace fs = std::filesystem;
+
+        const char* const kCommands[] = {"help", "ls",   "cd",   "pwd", "cls", "exit",
+                                         "run",  "edit", "load", "save", "new"};
+
+        // Path shown to the user, without the sandbox "carts/" prefix.
+        std::string strip_root(const std::string& p)
         {
-            namespace fs = std::filesystem;
-            std::error_code ec;
-            if (fs::exists(name, ec))
-                return name;
-            for (const char* dir : {"carts/", "examples/carts/"})
-                for (const char* ext : {".lz100", ".lua"})
-                {
-                    std::string p = std::string(dir) + name + ext;
-                    if (fs::exists(p, ec))
-                        return p;
-                }
-            return {};
+            if (p == "carts")
+                return "";
+            if (p.rfind("carts/", 0) == 0)
+                return p.substr(6);
+            return p;
+        }
+
+        bool starts_with(const std::string& s, const std::string& prefix)
+        {
+            return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
         }
 
         // Erase the last UTF-8 code point from s (handles multibyte 中日韩 input).
@@ -42,6 +45,37 @@ namespace lazy100
             } while (i > 0 && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80);
             s.erase(i);
         }
+
+        // cwd is a real path under "carts"; show it as a sandboxed virtual root.
+        std::string display_cwd(const std::string& cwd)
+        {
+            if (cwd == "carts")
+                return "/";
+            if (cwd.rfind("carts/", 0) == 0)
+                return "/" + cwd.substr(6);
+            return "/" + cwd;
+        }
+
+        // Split "cmd arg..." into command + argument (remainder after first space).
+        void split(const std::string& line, std::string& cmd, std::string& arg)
+        {
+            const size_t b = line.find_first_not_of(" \t");
+            if (b == std::string::npos)
+            {
+                cmd.clear();
+                arg.clear();
+                return;
+            }
+            const size_t e = line.find_first_of(" \t", b);
+            cmd            = line.substr(b, e == std::string::npos ? std::string::npos : e - b);
+            arg.clear();
+            if (e != std::string::npos)
+            {
+                const size_t ab = line.find_first_not_of(" \t", e);
+                if (ab != std::string::npos)
+                    arg = line.substr(ab);
+            }
+        }
     } // namespace
 
     Shell::Shell()
@@ -54,24 +88,19 @@ namespace lazy100
 
     void Shell::exec(Console& con, const std::string& line)
     {
-        // first token = command, remainder = argument
-        size_t            b   = line.find_first_not_of(" \t");
-        if (b == std::string::npos)
+        std::string cmd, arg;
+        split(line, cmd, arg);
+        if (cmd.empty())
             return;
-        size_t            e   = line.find_first_of(" \t", b);
-        const std::string cmd = line.substr(b, e == std::string::npos ? std::string::npos : e - b);
-        std::string       arg;
-        if (e != std::string::npos)
-        {
-            size_t ab = line.find_first_not_of(" \t", e);
-            if (ab != std::string::npos)
-                arg = line.substr(ab);
-        }
 
         if (cmd == "help")
-            print_line("commands: help  ls  cls  run  edit  load  save  new");
+            print_line("commands: help ls cd pwd cls run edit load save new exit");
         else if (cmd == "cls")
             lines_.clear();
+        else if (cmd == "exit" || cmd == "quit")
+            con.quit();
+        else if (cmd == "pwd")
+            print_line(display_cwd(cwd_));
         else if (cmd == "edit")
             con.set_mode(ConsoleMode::Editor);
         else if (cmd == "run")
@@ -79,22 +108,38 @@ namespace lazy100
             if (!con.start_cart())
                 print_line("no cart loaded");
         }
+        else if (cmd == "cd")
+        {
+            if (arg.empty())
+            {
+                cwd_ = "carts"; // bare `cd` -> root
+                return;
+            }
+            const fs::path    target = (fs::path(cwd_) / arg).lexically_normal();
+            const std::string s      = target.generic_string();
+            if (s != "carts" && s.rfind("carts/", 0) != 0)
+            {
+                print_line("outside carts/");
+                return;
+            }
+            std::error_code ec;
+            if (fs::is_directory(target, ec))
+                cwd_ = s;
+            else
+                print_line("not a directory: " + arg);
+        }
         else if (cmd == "ls")
         {
             std::error_code ec;
-            bool            any = false;
-            for (const char* dir : {"carts", "examples/carts"})
-                for (const auto& en : std::filesystem::directory_iterator(dir, ec))
-                {
-                    const auto ext = en.path().extension().string();
-                    if (ext == ".lz100" || ext == ".lua")
-                    {
-                        print_line("  " + en.path().filename().string());
-                        any = true;
-                    }
-                }
-            if (!any)
-                print_line("(no carts found)");
+            const fs::path  dir = arg.empty() ? fs::path(cwd_) : (fs::path(cwd_) / arg);
+            std::vector<std::string> entries;
+            for (const auto& en : fs::directory_iterator(dir, ec))
+                entries.push_back(en.path().filename().string() + (en.is_directory(ec) ? "/" : ""));
+            std::sort(entries.begin(), entries.end());
+            if (entries.empty())
+                print_line("(empty)");
+            for (const auto& e : entries)
+                print_line("  " + e);
         }
         else if (cmd == "new")
         {
@@ -104,53 +149,155 @@ namespace lazy100
         else if (cmd == "load")
         {
             if (arg.empty())
-                print_line("usage: load <name>");
-            else
             {
-                const std::string p = resolve_cart(arg);
-                if (p.empty())
-                    print_line("not found: " + arg);
-                else if (con.load_cart_file(p))
-                    print_line("loaded " + p);
-                else
-                    print_line("load failed");
+                print_line("usage: load <name>");
+                return;
             }
+            std::error_code          ec;
+            std::string              found;
+            for (const std::string& cand : {arg, arg + ".lz100", arg + ".lua"})
+            {
+                const fs::path p = fs::path(cwd_) / cand;
+                if (fs::exists(p, ec))
+                {
+                    found = p.generic_string();
+                    break;
+                }
+            }
+            if (found.empty())
+                print_line("not found: " + arg);
+            else if (con.load_cart_file(found))
+                print_line("loaded " + strip_root(found));
+            else
+                print_line("load failed");
         }
         else if (cmd == "save")
         {
             if (arg.empty())
-                print_line("usage: save <name>");
-            else
             {
-                std::string p = arg;
-                if (p.find('.') == std::string::npos)
-                    p = "carts/" + arg + ".lz100";
-                if (con.save_cart_file(p))
-                    print_line("saved " + p);
-                else
-                    print_line("save failed");
+                print_line("usage: save <name>");
+                return;
             }
+            std::string name = arg;
+            if (name.find('.') == std::string::npos)
+                name += ".lz100";
+            const std::string p = (fs::path(cwd_) / name).generic_string();
+            if (con.save_cart_file(p))
+                print_line("saved " + strip_root(p));
+            else
+                print_line("save failed");
         }
         else
             print_line("unknown command: " + cmd);
+    }
+
+    void Shell::complete()
+    {
+        const size_t      sp     = input_.find_last_of(" \t");
+        const bool        first  = sp == std::string::npos;
+        const std::string prefix = first ? input_ : input_.substr(sp + 1);
+        std::string       head   = first ? std::string() : input_.substr(0, sp + 1);
+
+        std::vector<std::string> matches;
+        if (first)
+        {
+            for (const char* c : kCommands)
+                if (starts_with(c, prefix))
+                    matches.emplace_back(c);
+        }
+        else
+        {
+            namespace fs = std::filesystem;
+            fs::path    base       = cwd_;
+            std::string filePrefix = prefix;
+            const size_t slash      = prefix.find_last_of("/\\");
+            if (slash != std::string::npos)
+            {
+                base       = fs::path(cwd_) / prefix.substr(0, slash);
+                filePrefix = prefix.substr(slash + 1);
+                head += prefix.substr(0, slash + 1);
+            }
+            std::error_code ec;
+            for (const auto& en : fs::directory_iterator(base, ec))
+            {
+                std::string name = en.path().filename().string();
+                if (starts_with(name, filePrefix))
+                    matches.push_back(name + (en.is_directory(ec) ? "/" : ""));
+            }
+        }
+
+        if (matches.empty())
+            return;
+        if (matches.size() == 1)
+        {
+            input_ = head + matches[0];
+            if (first)
+                input_ += ' ';
+            return;
+        }
+        // Multiple: complete to the longest common prefix and list the options.
+        std::string lcp = matches[0];
+        for (const auto& m : matches)
+        {
+            size_t i = 0;
+            while (i < lcp.size() && i < m.size() && lcp[i] == m[i])
+                ++i;
+            lcp.resize(i);
+        }
+        input_ = head + lcp;
+        std::string listed;
+        for (const auto& m : matches)
+        {
+            listed += m;
+            listed += "  ";
+        }
+        print_line(listed);
+    }
+
+    void Shell::history_prev()
+    {
+        if (history_.empty())
+            return;
+        if (hist_pos_ == static_cast<int>(history_.size()))
+            stash_ = input_; // save the line being edited
+        if (hist_pos_ > 0)
+            --hist_pos_;
+        input_ = history_[hist_pos_];
+    }
+
+    void Shell::history_next()
+    {
+        if (hist_pos_ >= static_cast<int>(history_.size()))
+            return;
+        ++hist_pos_;
+        input_ = (hist_pos_ == static_cast<int>(history_.size())) ? stash_ : history_[hist_pos_];
     }
 
     void Shell::update(Console& con)
     {
         Keyboard& kb = con.keyboard();
 
-        // Typed characters (filter out control bytes; multibyte CJK passes through).
         for (char c : kb.text())
             if (static_cast<unsigned char>(c) >= 0x20 || (static_cast<unsigned char>(c) & 0x80))
                 input_.push_back(c);
 
-        if (kb.repeat(Keyboard::Backspace)) // hold to keep deleting
+        if (kb.repeat(Keyboard::Backspace))
             erase_last_utf8(input_);
+        if (kb.pressed(Keyboard::Tab))
+            complete();
+        if (kb.pressed(Keyboard::Up))
+            history_prev();
+        if (kb.pressed(Keyboard::Down))
+            history_next();
         if (kb.pressed(Keyboard::Return))
         {
-            print_line("> " + input_);
+            print_line(display_cwd(cwd_) + "> " + input_);
+            if (!input_.empty())
+                history_.push_back(input_);
             exec(con, input_);
             input_.clear();
+            hist_pos_ = static_cast<int>(history_.size());
+            stash_.clear();
         }
         ++blink_;
     }
@@ -171,7 +318,7 @@ namespace lazy100
             y += lh;
         }
 
-        const std::string prompt = "> " + input_;
+        const std::string prompt = display_cwd(cwd_) + "> " + input_;
         const int         cx     = font::print(fb, prompt.c_str(), 4, y, 7);
         if ((blink_ / 20) % 2 == 0)
             fb.rectfill(cx, y, cx + 1, y + lh - 3, 7); // blinking cursor

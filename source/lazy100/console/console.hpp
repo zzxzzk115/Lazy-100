@@ -47,6 +47,7 @@ namespace lazy100
 
         ConsoleMode mode() const { return mode_; }
         void        set_mode(ConsoleMode m) { mode_ = m; }
+        void        quit() { running_ = false; } // exit the main loop
 
         // Cart lifecycle (the .lz100 format bundles code + sprite sheet).
         std::string& code() { return code_; } // current cart's Lua source
