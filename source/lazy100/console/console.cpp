@@ -4,6 +4,7 @@
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/vfs/vfs.hpp"
+#include "lazy100/video/cursor.hpp"
 #include "lazy100/video/font.hpp"
 
 #include <chrono>
@@ -114,6 +115,27 @@ namespace lazy100
         return true;
     }
 
+    bool Console::tooltip_active(int id, bool over)
+    {
+        if (over)
+        {
+            if (hover_id_ != id)
+            {
+                hover_id_ = id;
+                hover_t_  = 0.0;
+            }
+            else
+                hover_t_ += dt_;
+            return hover_t_ >= 0.5; // show after resting ~0.5s
+        }
+        if (hover_id_ == id) // moved off this hotspot
+        {
+            hover_id_ = -1;
+            hover_t_  = 0.0;
+        }
+        return false;
+    }
+
     void Console::run()
     {
         using clock = std::chrono::steady_clock;
@@ -127,19 +149,25 @@ namespace lazy100
             prev           = now;
             if (dt > 0.25)
                 dt = 0.25; // clamp to dodge the spiral of death after a stall
+            dt_ = dt;      // expose to UI (key-repeat / tooltip timing)
 
             window_.pump_events(running_);
             if (!running_)
                 break;
-            keyboard_.update(window_);
+            keyboard_.update(window_, dt);
             mouse_.update(window_);
             input_.poll(); // live held state for btn()
 
             // ESC: Running -> Editor, else toggle Shell <-> Editor.
             if (keyboard_.pressed(Keyboard::Escape))
-                mode_ = (mode_ == ConsoleMode::Shell) ? ConsoleMode::Editor
-                        : (mode_ == ConsoleMode::Editor) ? ConsoleMode::Shell
-                                                         : ConsoleMode::Editor;
+            {
+                const ConsoleMode prev = mode_;
+                mode_                   = (mode_ == ConsoleMode::Shell) ? ConsoleMode::Editor
+                                          : (mode_ == ConsoleMode::Editor) ? ConsoleMode::Shell
+                                                                           : ConsoleMode::Editor;
+                if (prev == ConsoleMode::Running) // leaving a running cart: silence its music
+                    audio_.stop_music();
+            }
 
             switch (mode_)
             {
@@ -169,6 +197,16 @@ namespace lazy100
                     editor_host_.update(*this);
                     editor_host_.draw(*this, framebuffer_);
                     break;
+            }
+
+            // Software pixel cursor, drawn on top. Context-dependent in the editor/shell; the
+            // running cart owns the screen, so we leave the cursor off there.
+            if (mouse_.in_bounds())
+            {
+                if (mode_ == ConsoleMode::Editor)
+                    cursor::draw(framebuffer_, editor_host_.cursor(*this), mouse_.x(), mouse_.y());
+                else if (mode_ == ConsoleMode::Shell)
+                    cursor::draw(framebuffer_, cursor::Arrow, mouse_.x(), mouse_.y());
             }
 
             present_.submit_frame(framebuffer_, palette_);

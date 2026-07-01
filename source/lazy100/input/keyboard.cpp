@@ -8,9 +8,10 @@ namespace lazy100
 {
     namespace
     {
-        // Auto-repeat tuned for per-frame editor input (~60 fps): ~0.3s delay, then fast.
-        constexpr int kRepeatDelay  = 20;
-        constexpr int kRepeatPeriod = 2;
+        // Auto-repeat timing in seconds (frame-rate independent): a hold delay, then a calm
+        // repeat interval. Tuned to feel deliberate, not twitchy, on any refresh rate.
+        constexpr double kRepeatDelay  = 0.40; // wait before repeating
+        constexpr double kRepeatPeriod = 0.09; // ~11 pulses/sec while held
 
         SDL_Scancode scancode(Keyboard::Key k)
         {
@@ -34,7 +35,7 @@ namespace lazy100
         }
     } // namespace
 
-    void Keyboard::update(const Window& window)
+    void Keyboard::update(const Window& window, double dt)
     {
         const bool* ks = SDL_GetKeyboardState(nullptr);
 
@@ -43,11 +44,29 @@ namespace lazy100
             prev_[i] = held_[i];
             held_[i] = ks[scancode(static_cast<Key>(i))];
             if (!held_[i])
-                repeat_[i] = 0;
-            else if (held_[i] && !prev_[i]) // fresh press
-                repeat_[i] = 0;
+            {
+                hold_[i] = acc_[i] = 0.0;
+                fire_[i]           = false;
+            }
+            else if (!prev_[i]) // fresh press: fire once immediately
+            {
+                hold_[i] = acc_[i] = 0.0;
+                fire_[i]           = true;
+            }
             else
-                ++repeat_[i];
+            {
+                hold_[i] += dt;
+                fire_[i] = false;
+                if (hold_[i] >= kRepeatDelay) // past the initial delay -> pulse every period
+                {
+                    acc_[i] += dt;
+                    if (acc_[i] >= kRepeatPeriod)
+                    {
+                        acc_[i] -= kRepeatPeriod;
+                        fire_[i] = true;
+                    }
+                }
+            }
         }
 
         ctrl_  = ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL];
@@ -64,12 +83,5 @@ namespace lazy100
         return k >= 0 && k < Count && held_[k] && !prev_[k]; // clean edge, no repeat
     }
 
-    bool Keyboard::repeat(Key k) const
-    {
-        if (k < 0 || k >= Count || !held_[k])
-            return false;
-        if (!prev_[k])
-            return true; // initial press
-        return repeat_[k] >= kRepeatDelay && (repeat_[k] - kRepeatDelay) % kRepeatPeriod == 0;
-    }
+    bool Keyboard::repeat(Key k) const { return k >= 0 && k < Count && fire_[k]; }
 } // namespace lazy100

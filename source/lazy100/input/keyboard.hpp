@@ -33,7 +33,7 @@ namespace lazy100
             Count
         };
 
-        void update(const Window& window); // call once per render frame
+        void update(const Window& window, double dt); // call once per render frame; dt = seconds
 
         bool held(Key k) const;
         bool pressed(Key k) const; // clean single-press edge (no auto-repeat) — for toggles
@@ -46,9 +46,11 @@ namespace lazy100
         bool alt() const { return alt_; }
 
     private:
-        bool        held_[Count]   = {};
-        bool        prev_[Count]   = {};
-        int         repeat_[Count] = {}; // consecutive held frames, for auto-repeat
+        bool        held_[Count] = {};
+        bool        prev_[Count] = {};
+        double      hold_[Count] = {}; // seconds a key has been held (for auto-repeat timing)
+        double      acc_[Count]  = {}; // seconds since this key last emitted a repeat pulse
+        bool        fire_[Count] = {}; // whether repeat() should return true this frame
         std::string text_;
         bool        ctrl_  = false;
         bool        shift_ = false;

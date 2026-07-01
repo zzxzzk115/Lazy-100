@@ -12,8 +12,10 @@ namespace lazy100
     {
     public:
         const char* name() const override { return "MAP"; }
-        void        update(Console& con) override;
-        void        draw(Console& con, Framebuffer& fb) override;
+        icon::Id     icon() const override { return icon::TabMap; }
+        void         update(Console& con) override;
+        void         draw(Console& con, Framebuffer& fb) override;
+        cursor::Type cursor(Console& con) const override;
 
     private:
         int tile_  = 1; // sprite index to paint (0 = erase / empty)

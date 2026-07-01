@@ -12,6 +12,7 @@ namespace lazy100
     {
     public:
         const char* name() const override { return "MUSIC"; }
+        icon::Id    icon() const override { return icon::TabMusic; }
         void        draw(Console& con, Framebuffer& fb) override;
 
     private:

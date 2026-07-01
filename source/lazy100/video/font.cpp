@@ -104,7 +104,7 @@ namespace lazy100::font
     bool init()
     {
         // Built-in font, linked into the binary and read from the in-memory VFS.
-        constexpr const char* kPath = "fonts/fusion-pixel-10px-proportional-zh_hans.ttf";
+        constexpr const char* kPath = "fonts/fusion-pixel-10px-monospaced-zh_hans.ttf";
         auto                  bytes = vfs::read_builtin(kPath);
         if (!bytes || bytes->empty())
         {
@@ -141,6 +141,24 @@ namespace lazy100::font
     }
 
     int line_height() { return g_lineH; }
+
+    int text_width(const char* text)
+    {
+        if (!g_ready)
+            return 0;
+        int w = 0;
+        for (const char* p = text; *p;)
+        {
+            if (*p == '\n')
+            {
+                ++p;
+                continue;
+            }
+            const int cp = next_cp(p);
+            w += glyph_for(cp).advance;
+        }
+        return w;
+    }
 
     int print(Framebuffer& fb, const char* text, int x, int y, u8 c)
     {

@@ -27,6 +27,7 @@ namespace lazy100
         }
         SDL_RaiseWindow(window_); // claim focus in case a backend's context grab opened us behind
         SDL_StartTextInput(window_); // editors need typed characters (SDL_EVENT_TEXT_INPUT)
+        SDL_HideCursor();            // we draw our own pixel cursor into the framebuffer
         return true;
     }
 

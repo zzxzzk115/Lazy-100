@@ -89,10 +89,11 @@ namespace lazy100
 
         // ---- audio-thread state ----
         Channel  channels[kChannels];
-        bool     musicOn   = false;
-        int      musicCur   = 0;
-        bool     musicLoad  = false; // load musicCur at the next opportunity
-        uint32_t lastSeq    = 0;
+        bool     musicOn    = false;
+        int      musicCur    = 0;
+        int      musicStart  = 0;     // pattern music() started on; loop target
+        bool     musicLoad   = false; // load musicCur at the next opportunity
+        uint32_t lastSeq     = 0;
 
         void start_channel(int ch, const SfxPattern& pat, bool fromMusic)
         {
@@ -128,14 +129,24 @@ namespace lazy100
                     any = true;
                 }
             }
-            if (!any) // empty pattern -> stop, don't spin
-                musicOn = false;
+            if (!any)
+            {
+                // Empty pattern: loop back to the start (continuous background music). If the
+                // start pattern itself is empty, there is nothing to play, so stop.
+                if (musicCur != musicStart)
+                {
+                    musicCur  = musicStart;
+                    musicLoad = true;
+                }
+                else
+                    musicOn = false;
+            }
         }
 
         void advance_music_if_idle()
         {
-            if (!musicOn)
-                return;
+            if (!musicOn || musicLoad)
+                return; // a pattern load is already queued; don't advance again meanwhile
             for (int c = 0; c < kChannels; ++c)
                 if (channels[c].active && channels[c].from_music)
                     return; // still playing this pattern
@@ -178,9 +189,10 @@ namespace lazy100
                 }
                 else
                 {
-                    musicOn   = true;
-                    musicCur  = idx;
-                    musicLoad = true;
+                    musicOn    = true;
+                    musicCur   = idx;
+                    musicStart = idx;
+                    musicLoad  = true;
                 }
             }
 

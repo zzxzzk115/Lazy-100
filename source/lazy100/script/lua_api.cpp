@@ -158,8 +158,8 @@ namespace lazy100
                     for (int i = 0; i < cel_w; ++i)
                     {
                         const u8 n = world.get(cel_x + i, cel_y + j);
-                        if (n == 0)
-                            continue; // tile 0 is empty
+                        if (n == Map::kEmpty)
+                            continue; // 255 is the empty cell
                         sheet.spr(fb, n, scr_x + i * SpriteSheet::kSpriteSize, scr_y + j * SpriteSheet::kSpriteSize,
                                   1, 1, false, false, dpal, trans);
                     }

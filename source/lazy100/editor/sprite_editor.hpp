@@ -12,8 +12,10 @@ namespace lazy100
     {
     public:
         const char* name() const override { return "SPRITE"; }
-        void        update(Console& con) override;
-        void        draw(Console& con, Framebuffer& fb) override;
+        icon::Id     icon() const override { return icon::TabSprite; }
+        void         update(Console& con) override;
+        void         draw(Console& con, Framebuffer& fb) override;
+        cursor::Type cursor(Console& con) const override;
 
     private:
         int color_  = 7; // current draw color

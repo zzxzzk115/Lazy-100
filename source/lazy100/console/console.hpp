@@ -52,6 +52,11 @@ namespace lazy100
         void        set_mode(ConsoleMode m) { mode_ = m; }
         void        quit() { running_ = false; } // exit the main loop
 
+        double frame_dt() const { return dt_; } // seconds elapsed last frame (for UI timing)
+        // Hover-delay gate for '?' tooltips: accumulates while the mouse rests on hotspot `id`,
+        // returns true once it has hovered long enough. One hotspot is timed at a time.
+        bool tooltip_active(int id, bool over);
+
         // Cart lifecycle (the .lz100 format bundles code + sprite sheet).
         std::string& code() { return code_; } // current cart's Lua source
         bool         load_cart_file(const std::string& path); // parse .lz100/.lua -> code_ + sheet_
@@ -89,5 +94,9 @@ namespace lazy100
         ConsoleMode mode_      = ConsoleMode::Shell;
         bool        has_cart_  = false;
         bool        running_   = true;
+
+        double dt_       = 0.0; // last frame delta (seconds)
+        int    hover_id_ = -1;  // hotspot currently being hover-timed
+        double hover_t_  = 0.0; // seconds hovered on hover_id_
     };
 } // namespace lazy100

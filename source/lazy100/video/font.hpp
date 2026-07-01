@@ -18,6 +18,9 @@ namespace lazy100
         // past the last glyph (PICO-8 print's return value).
         int print(Framebuffer& fb, const char* text, int x, int y, u8 c);
 
+        // Advance width of `text` in pixels (no drawing) — for carets, columns, popups.
+        int text_width(const char* text);
+
         int line_height();
     } // namespace font
 } // namespace lazy100

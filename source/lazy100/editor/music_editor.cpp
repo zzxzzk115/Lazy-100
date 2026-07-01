@@ -3,10 +3,12 @@
 #include "lazy100/audio/audio.hpp"
 #include "lazy100/audio/sound.hpp"
 #include "lazy100/console/console.hpp"
+#include "lazy100/editor/ui.hpp"
 #include "lazy100/input/mouse.hpp"
 #include "lazy100/video/draw.hpp"
 #include "lazy100/video/font.hpp"
 #include "lazy100/video/framebuffer.hpp"
+#include "lazy100/video/icons.hpp"
 
 #include <cstdio>
 
@@ -14,18 +16,6 @@ namespace lazy100
 {
     namespace
     {
-        bool inside(int mx, int my, int x, int y, int w, int h)
-        {
-            return mx >= x && my >= y && mx < x + w && my < y + h;
-        }
-        bool button(Framebuffer& fb, const Mouse& m, int x, int y, int w, int h, const char* label, u8 bg)
-        {
-            fb.rectfill(x, y, x + w - 1, y + h - 1, bg);
-            draw::rect(fb, x, y, x + w - 1, y + h - 1, 6);
-            font::print(fb, label, x + 3, y + 2, 7);
-            return m.pressed(Mouse::Left) && inside(m.x(), m.y(), x, y, w, h);
-        }
-
         // Cycle an sfx-slot value: 0..63 are patterns, 255 = off, wrapping through off.
         u8 step_slot(u8 v, int dir)
         {
@@ -42,50 +32,58 @@ namespace lazy100
         MusicPattern& mp   = bank.music[current_];
         const Mouse&  m    = con.mouse();
 
-        fb.rectfill(0, EditorHost::kTabH, 319, 239, 0);
+        ui::clear(fb, EditorHost::kTabH);
 
-        // Header: pattern select + transport.
-        char hdr[32];
-        std::snprintf(hdr, sizeof(hdr), "MUSIC %02d", current_);
-        font::print(fb, hdr, 8, 20, 7);
-        if (button(fb, m, 78, 19, 12, 11, "<", 1))
+        // ---- transport toolbar ----
+        ui::panel(fb, 2, 18, 316, 18);
+        if (ui::icon_button(fb, m, 6, 20, 14, 14, icon::Prev))
             current_ = (current_ + SoundBank::kMusicCount - 1) % SoundBank::kMusicCount;
-        if (button(fb, m, 92, 19, 12, 11, ">", 1))
+        if (ui::icon_button(fb, m, 22, 20, 14, 14, icon::Next))
             current_ = (current_ + 1) % SoundBank::kMusicCount;
-        if (button(fb, m, 190, 19, 56, 12, "PLAY", 3))
+        char hdr[16];
+        std::snprintf(hdr, sizeof(hdr), "MUS %02d", current_);
+        font::print(fb, hdr, 42, 21, ui::kText);
+        if (ui::icon_button(fb, m, 268, 20, 20, 14, icon::Play))
             con.audio().play_music(current_, bank);
-        if (button(fb, m, 252, 19, 56, 12, "STOP", 2))
+        if (ui::icon_button(fb, m, 292, 20, 20, 14, icon::Stop))
             con.audio().stop_music();
 
-        // Four channel slots.
-        font::print(fb, "channels play together; sequencer chains patterns", 8, 40, 5);
+        // ---- channel arrangement ----
+        const int ph = ui::titled_panel(fb, 2, 40, 316, 150, icon::TabMusic);
+        font::print(fb, "channels play together; patterns chain in sequence", 8, ph + 2, ui::kDim);
         for (int c = 0; c < MusicPattern::kChannels; ++c)
         {
-            const int y = 56 + c * 26;
-            char      lbl[16];
-            std::snprintf(lbl, sizeof(lbl), "CH %d", c);
-            font::print(fb, lbl, 8, y + 3, 7);
+            const int y = ph + 16 + c * 30;
+            ui::panel(fb, 8, y, 300, 26, ui::kPanel, ui::kBorder);
+            char ch[8];
+            std::snprintf(ch, sizeof(ch), "CH%d", c);
+            font::print(fb, ch, 14, y + 9, ui::kText);
 
-            if (button(fb, m, 52, y, 14, 13, "-", 1))
+            if (ui::icon_button(fb, m, 44, y + 5, 16, 16, icon::Minus))
                 mp.sfx[c] = step_slot(mp.sfx[c], -1);
 
+            // Value well.
+            fb.rectfill(64, y + 5, 99, y + 20, ui::kPanelLo);
+            draw::rect(fb, 64, y + 5, 99, y + 20, ui::kBorder);
             char val[8];
             if (mp.sfx[c] == 255)
-                std::snprintf(val, sizeof(val), "--");
+                std::snprintf(val, sizeof(val), "off");
             else
                 std::snprintf(val, sizeof(val), "%02d", mp.sfx[c]);
-            fb.rectfill(70, y, 99, y + 12, mp.sfx[c] == 255 ? 1 : 3);
-            draw::rect(fb, 70, y, 99, y + 12, 6);
-            font::print(fb, val, 78, y + 2, 7);
+            font::print(fb, val, 72, y + 9, mp.sfx[c] == 255 ? ui::kDim : ui::kText);
 
-            if (button(fb, m, 104, y, 14, 13, "+", 1))
+            if (ui::icon_button(fb, m, 104, y + 5, 16, 16, icon::Plus))
                 mp.sfx[c] = step_slot(mp.sfx[c], +1);
 
-            // Preview just this channel's sfx.
-            if (mp.sfx[c] != 255 && button(fb, m, 128, y, 52, 13, "hear", 3))
+            if (mp.sfx[c] != 255 && ui::icon_button(fb, m, 130, y + 5, 18, 16, icon::TabSfx))
                 con.audio().play_sfx(bank.sfx[mp.sfx[c]], c);
         }
 
-        font::print(fb, "PLAY: from this pattern   STOP: silence", 8, 172, 6);
+        ui::help_button(fb, con, m, 250, 20, 4,
+                        "MUSIC\n"
+                        "- / + : set each channel's sfx\n"
+                        "< > : prev / next pattern\n"
+                        "PLAY / STOP: transport\n"
+                        "speaker: preview one channel");
     }
 } // namespace lazy100
