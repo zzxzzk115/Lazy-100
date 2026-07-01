@@ -3,7 +3,7 @@
 A **fantasy game console** in the spirit of PICO-8 / TIC-80 / basic8, but at a readable
 **320×240** resolution and scripted in **Lua 5.4**. It stands on the shoulders of
 [VRI](https://github.com/zzxzzk115/VRI), a cross-backend Render Hardware Interface
-(Vulkan / D3D12 / WebGPU / OpenGL).
+(Vulkan / D3D12 / Metal / WebGPU / OpenGL / OpenGL ES / WebGL).
 
 ## Stack
 
@@ -18,7 +18,7 @@ Requires [xmake](https://xmake.io) and, on Windows, the Vulkan SDK (for the load
 
 ```sh
 xmake            # configure + build
-xmake run lazy100 [cart.lua]
+xmake run lazy100 [cart.lua or cart.lz100]
 ```
 
 ## Status
@@ -38,4 +38,4 @@ backbone: a window comes up driven by VRI through SDL3). 中文文档见
 
 ## License
 
-MIT © Lazy_V (project code; bundled assets keep their own licenses — see Credits)
+[MIT](./LICENSE) © Lazy_V (project code; bundled assets keep their own licenses — see [Credits](#credits))
