@@ -13,6 +13,7 @@
 #include "lazy100/video/framebuffer.hpp"
 #include "lazy100/video/palette.hpp"
 #include "lazy100/video/sprites.hpp"
+#include "lazy100/world/map.hpp"
 
 #include <array>
 #include <string>
@@ -43,6 +44,7 @@ namespace lazy100
         Keyboard&    keyboard() { return keyboard_; }
         Mouse&       mouse() { return mouse_; }
         SpriteSheet& sheet() { return sheet_; }
+        Map&         map() { return map_; }
         Audio&       audio() { return audio_; }
 
         ConsoleMode mode() const { return mode_; }
@@ -71,6 +73,7 @@ namespace lazy100
         Keyboard    keyboard_;
         Mouse       mouse_;
         SpriteSheet sheet_;
+        Map         map_;
         Audio       audio_;
         LuaRuntime  lua_;
         Shell       shell_;

@@ -1,6 +1,7 @@
 #include "lazy100/cart/cart.hpp"
 
 #include "lazy100/video/sprites.hpp"
+#include "lazy100/world/map.hpp"
 
 #include <sstream>
 
@@ -34,12 +35,13 @@ namespace lazy100::cart
         }
     } // namespace
 
-    bool parse(const std::string& text, std::string& code, SpriteSheet& sheet)
+    bool parse(const std::string& text, std::string& code, SpriteSheet& sheet, Map& map)
     {
         code.clear();
         sheet.clear();
+        map.clear();
 
-        std::string gfxHex, gffHex;
+        std::string gfxHex, gffHex, mapHex;
         bool        sawSection = false;
 
         enum class Sec
@@ -47,7 +49,8 @@ namespace lazy100::cart
             None,
             Lua,
             Gfx,
-            Gff
+            Gff,
+            Map
         } sec = Sec::None;
 
         std::istringstream ss(text);
@@ -64,7 +67,8 @@ namespace lazy100::cart
                 sec        = name == "lua"   ? Sec::Lua
                              : name == "gfx" ? Sec::Gfx
                              : name == "gff" ? Sec::Gff
-                                             : Sec::None; // map/sfx/music etc. skipped for now
+                             : name == "map" ? Sec::Map
+                                             : Sec::None; // sfx/music etc. skipped for now
                 continue;
             }
 
@@ -76,6 +80,7 @@ namespace lazy100::cart
                     break;
                 case Sec::Gfx: gfxHex += line; break;
                 case Sec::Gff: gffHex += line; break;
+                case Sec::Map: mapHex += line; break;
                 case Sec::None: break; // header lines / unknown sections
             }
         }
@@ -99,13 +104,22 @@ namespace lazy100::cart
             if (hi >= 0 && lo >= 0)
                 sheet.set_flags(static_cast<int>(n), static_cast<u8>((hi << 4) | lo));
         }
+        u8* tiles = map.tiles();
+        for (size_t i = 0, t = 0; i + 1 < mapHex.size() && t < static_cast<size_t>(Map::kW) * Map::kH; i += 2, ++t)
+        {
+            const int hi = hex_val(mapHex[i]);
+            const int lo = hex_val(mapHex[i + 1]);
+            if (hi >= 0 && lo >= 0)
+                tiles[t] = static_cast<u8>((hi << 4) | lo);
+        }
         return true;
     }
 
-    std::string serialize(const std::string& code, const SpriteSheet& sheet)
+    std::string serialize(const std::string& code, const SpriteSheet& sheet, const Map& map)
     {
         std::string out;
-        out.reserve(static_cast<size_t>(kSheet) * kSheet * 2 + code.size() + 256);
+        out.reserve(static_cast<size_t>(kSheet) * kSheet * 2 + static_cast<size_t>(Map::kW) * Map::kH * 2 +
+                    code.size() + 256);
         out += "lazy-100 cartridge\nversion 1\n";
 
         out += "__lua__\n";
@@ -134,6 +148,19 @@ namespace lazy100::cart
             out += hex_digit(f & 0xf);
             if ((n % 16) == 15)
                 out += '\n';
+        }
+
+        out += "__map__\n";
+        const u8* tiles = map.tiles();
+        for (int y = 0; y < Map::kH; ++y)
+        {
+            for (int x = 0; x < Map::kW; ++x)
+            {
+                const u8 v = tiles[y * Map::kW + x];
+                out += hex_digit(v >> 4);
+                out += hex_digit(v & 0xf);
+            }
+            out += '\n';
         }
         return out;
     }

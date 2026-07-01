@@ -9,6 +9,7 @@
 #include "lazy100/video/framebuffer.hpp"
 #include "lazy100/video/palette.hpp"
 #include "lazy100/video/sprites.hpp"
+#include "lazy100/world/map.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -68,6 +69,7 @@ namespace lazy100
         Framebuffer& fb    = console.framebuffer();
         Input&       in    = console.input();
         SpriteSheet& sheet = console.sheet();
+        Map&         world = console.map();
         Palette&     pal   = console.palette();
         u8*          dpal  = console.draw_pal();      // live draw-palette remap
         bool*        trans = console.transparent();   // live transparency mask
@@ -136,6 +138,32 @@ namespace lazy100
                                  return sol::make_object(L, sheet.flag_bit(fi(n), fi(*bit)));
                              return sol::make_object(L, static_cast<int>(sheet.flags(fi(n))));
                          });
+
+        // ---- map: mget/mset read/write tiles; map() blits a region of 16px tiles ----
+        lua.set_function("mget",
+                         [&world](double x, double y) { return static_cast<int>(world.get(fi(x), fi(y))); });
+        lua.set_function("mset",
+                         [&world](double x, double y, sol::optional<double> v)
+                         { world.set(fi(x), fi(y), static_cast<u8>(fi(v, 0) & 0xff)); });
+        lua.set_function(
+            "map",
+            [&world, &sheet, &fb, dpal, trans](sol::optional<double> cx, sol::optional<double> cy,
+                                               sol::optional<double> sx, sol::optional<double> sy,
+                                               sol::optional<double> cw, sol::optional<double> ch)
+            {
+                const int cel_x = fi(cx, 0), cel_y = fi(cy, 0);
+                const int scr_x = fi(sx, 0), scr_y = fi(sy, 0);
+                const int cel_w = fi(cw, Map::kW), cel_h = fi(ch, Map::kH);
+                for (int j = 0; j < cel_h; ++j)
+                    for (int i = 0; i < cel_w; ++i)
+                    {
+                        const u8 n = world.get(cel_x + i, cel_y + j);
+                        if (n == 0)
+                            continue; // tile 0 is empty
+                        sheet.spr(fb, n, scr_x + i * SpriteSheet::kSpriteSize, scr_y + j * SpriteSheet::kSpriteSize,
+                                  1, 1, false, false, dpal, trans);
+                    }
+            });
 
         // ---- palette: pal() draw/screen remap, palt() transparency ----
         lua.set_function("pal",
