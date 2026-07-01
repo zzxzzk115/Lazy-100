@@ -5,6 +5,10 @@ target("lazy100")
     add_files("run/main.cpp")
     add_deps("lazy100-static")
 
+    -- `xmake run` defaults the working dir to the exe's folder; use the project root so
+    -- relative cart paths (carts/, examples/carts/) resolve for ls/load/save.
+    set_rundir("$(projectdir)")
+
     -- Link the built-in assets (font, ...) into the executable so it is self-contained:
     -- Windows via an .rc RCDATA resource, Unix via an .incbin assembly object.
     if is_plat("windows") then
