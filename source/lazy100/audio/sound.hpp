@@ -37,11 +37,19 @@ namespace lazy100
         u8                          speed = 8; // 1/120 s ticks per step (bigger = slower)
     };
 
+    // One row of the song: the 4 channels play their sfx together, and rows advance in sequence.
+    // A channel set to 255 rests (silent) for this pattern. The sequence ends at the first Stop
+    // pattern, the first fully-empty pattern (all four 255), or the end of the table; at the end
+    // playback jumps back to the most recent LoopStart pattern (default: where music() began),
+    // unless Stop was set, which halts instead.
     struct MusicPattern
     {
-        static constexpr int          kChannels = 4;
-        std::array<u8, kChannels>     sfx {255, 255, 255, 255}; // sfx index per channel, 255 = none
-        u8                            flags = 0;                // bit0: loop-to-here (reserved)
+        static constexpr int kChannels = 4;
+        static constexpr u8  kLoopStart = 0x1; // flags bit: a loop returns to this pattern
+        static constexpr u8  kStop      = 0x2; // flags bit: stop after this pattern (no loop)
+
+        std::array<u8, kChannels> sfx {255, 255, 255, 255}; // sfx index per channel, 255 = rest
+        u8                        flags = 0;                 // kLoopStart | kStop
     };
 
     struct SoundBank

@@ -27,7 +27,12 @@ namespace lazy100
         void play_sfx(const SfxPattern& pat, int channel = -1);
         // Start the music sequencer at pattern `index` using a snapshot of `bank`. Thread-safe.
         void play_music(int index, const SoundBank& bank);
-        void stop_music(); // silence the music sequencer
+        void stop_music();               // silence the music sequencer and forget its position
+        void pause_music(bool paused);   // freeze/resume the sequencer in place (sfx keep playing)
+
+        // Index of the music pattern currently playing, or -1 if the sequencer is stopped.
+        // For UI playback indicators; updated from the audio thread. Thread-safe.
+        int music_pattern() const;
 
     private:
         struct Impl;

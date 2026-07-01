@@ -26,8 +26,8 @@ namespace lazy100
         struct Channel
         {
             bool       active    = false;
-            bool       from_music = false;
             SfxPattern pat;
+            int        last_step  = SfxPattern::kSteps - 1; // last step to play (trailing silence trimmed)
             int        step        = 0;
             double     step_samples = 0.0; // duration of the current step in samples
             double     into_step    = 0.0; // samples elapsed in the current step
@@ -86,56 +86,89 @@ namespace lazy100
         std::atomic<int>      bankActive {0};
         std::atomic<uint32_t> musicSeq {0};
         int                   musicReqIndex = -1; // written before bumping musicSeq
+        std::atomic<int>      musicPos {-1};      // currently-playing pattern (audio->UI), -1 = stopped
+        std::atomic<bool>     musicPauseFlag {false}; // main->audio: freeze the sequencer in place
 
         // ---- audio-thread state ----
-        Channel  channels[kChannels];
+        // Music and sfx keep independent voice banks that share the 4 output channels.
+        // An sfx on channel c masks (silences) the music voice on c, but that music voice
+        // keeps stepping underneath, so it resumes in sync the instant the sfx finishes.
+        Channel  musicVoice[kChannels];
+        Channel  sfxVoice[kChannels];
         bool     musicOn    = false;
-        int      musicCur    = 0;
-        int      musicStart  = 0;     // pattern music() started on; loop target
-        bool     musicLoad   = false; // load musicCur at the next opportunity
-        uint32_t lastSeq     = 0;
+        int      musicCur        = 0;
+        int      musicStart      = 0;     // pattern music() started on
+        int      musicLoopTarget = 0;     // where the song loops back to (last LoopStart seen)
+        u8       musicCurFlags   = 0;     // flags of the pattern currently playing (for Stop)
+        bool     musicLoad       = false; // load musicCur at the next opportunity
+        uint32_t lastSeq         = 0;
 
-        void start_channel(int ch, const SfxPattern& pat, bool fromMusic)
+        // Start `pat` on voice `c`. `trimTrailingSilence` (sfx) releases the channel right after
+        // the last audible note instead of holding it through 32 steps of trailing rests — so a
+        // short blip doesn't hog a channel (and mask music) for the whole pattern. Music voices
+        // pass false: they must run the full 32 steps to stay in sync with the other channels.
+        void start_voice(Channel& c, const SfxPattern& pat, bool trimTrailingSilence)
         {
-            Channel& c   = channels[ch];
-            c.active     = true;
-            c.from_music = fromMusic;
-            c.pat        = pat;
-            c.step       = 0;
-            c.into_step  = 0.0;
-            c.phase      = 0.0;
+            c.active       = true;
+            c.pat          = pat;
+            c.step         = 0;
+            c.into_step    = 0.0;
+            c.phase        = 0.0;
             c.step_samples = pat.speed * (sampleRate / 120.0);
+            c.last_step    = SfxPattern::kSteps - 1;
+            if (trimTrailingSilence)
+            {
+                c.last_step = 0;
+                for (int i = SfxPattern::kSteps - 1; i >= 0; --i)
+                    if (pat.notes[i].vol > 0)
+                    {
+                        c.last_step = i;
+                        break;
+                    }
+            }
         }
 
+        // Auto channel for an sfx (chan == -1): never fight music unless forced to.
         int pick_channel()
         {
+            // Prefer a fully idle channel (no sfx and no music on it).
             for (int i = 0; i < kChannels; ++i)
-                if (!channels[i].active)
+                if (!sfxVoice[i].active && !musicVoice[i].active)
                     return i;
-            return 0; // all busy: steal channel 0
+            // Otherwise borrow from music, highest channel first, so the lead voice on
+            // channel 0 is the last thing an sfx ever steals.
+            for (int i = kChannels - 1; i >= 0; --i)
+                if (!sfxVoice[i].active)
+                    return i;
+            return 0; // every sfx voice busy: steal channel 0
         }
 
         void load_music_pattern()
         {
             const SoundBank& bank = bankBuf[bankActive.load(std::memory_order_acquire)];
             const MusicPattern& mp = bank.music[musicCur % SoundBank::kMusicCount];
+            musicCurFlags = mp.flags;
+            if (mp.flags & MusicPattern::kLoopStart)
+                musicLoopTarget = musicCur; // future loops return here
             bool any = false;
             for (int c = 0; c < kChannels; ++c)
             {
                 const u8 idx = mp.sfx[c];
                 if (idx < SoundBank::kSfxCount)
                 {
-                    start_channel(c, bank.sfx[idx], true);
+                    start_voice(musicVoice[c], bank.sfx[idx], false); // full 32 steps: keep channels in sync
                     any = true;
                 }
+                else
+                    musicVoice[c].active = false; // 255 = this channel rests
             }
             if (!any)
             {
-                // Empty pattern: loop back to the start (continuous background music). If the
-                // start pattern itself is empty, there is nothing to play, so stop.
-                if (musicCur != musicStart)
+                // Empty pattern marks the end of the song: loop back to the loop target. If the
+                // target itself is empty, there is nothing to play, so stop.
+                if (musicCur != musicLoopTarget)
                 {
-                    musicCur  = musicStart;
+                    musicCur  = musicLoopTarget;
                     musicLoad = true;
                 }
                 else
@@ -148,10 +181,16 @@ namespace lazy100
             if (!musicOn || musicLoad)
                 return; // a pattern load is already queued; don't advance again meanwhile
             for (int c = 0; c < kChannels; ++c)
-                if (channels[c].active && channels[c].from_music)
-                    return; // still playing this pattern
-            // All music channels finished: advance (loop back to 0 at the end).
-            musicCur = (musicCur + 1) % SoundBank::kMusicCount;
+                if (musicVoice[c].active)
+                    return; // still playing this pattern (independent of any sfx borrowing)
+            // Pattern finished. A Stop flag halts here; otherwise advance to the next row (the
+            // next empty/Stop row, or the table wrapping to 0, decides where the song ends/loops).
+            if (musicCurFlags & MusicPattern::kStop)
+            {
+                musicOn = false;
+                return;
+            }
+            musicCur  = (musicCur + 1) % SoundBank::kMusicCount;
             musicLoad = true;
         }
 
@@ -159,6 +198,42 @@ namespace lazy100
         {
             auto* im = static_cast<Impl*>(dev->pUserData);
             im->render_block(static_cast<float*>(out), frames);
+        }
+
+        // Advance one voice by a single sample, mixing its output into `s` when `audible`.
+        // A muted voice (audible == false) still steps, so it stays in sync underneath sfx.
+        void step_voice(Channel& c, double& s, bool audible)
+        {
+            if (!c.active)
+                return;
+            const SfxNote& note = c.pat.notes[c.step];
+            if (note.vol > 0)
+            {
+                const double freq = pitch_freq(note.pitch);
+                const double raw  = wave_sample(static_cast<Wave>(note.wave % static_cast<int>(Wave::Count)),
+                                                c.phase, c, freq, sampleRate);
+                // Click-free envelope: short attack in, short release out of each step.
+                const double atk = std::min(64.0, c.step_samples * 0.1);
+                const double rel = std::min(512.0, c.step_samples * 0.25);
+                double       env = 1.0;
+                if (c.into_step < atk)
+                    env = c.into_step / atk;
+                else if (c.into_step > c.step_samples - rel)
+                    env = std::max(0.0, (c.step_samples - c.into_step) / rel);
+                if (audible)
+                    s += raw * env * (note.vol / 7.0) * 0.22;
+                c.phase += freq / sampleRate;
+            }
+
+            c.into_step += 1.0;
+            if (c.into_step >= c.step_samples)
+            {
+                c.into_step = 0.0;
+                c.phase     = 0.0;
+                ++c.step;
+                if (c.step > c.last_step) // past the last note to play (silence trimmed for sfx)
+                    c.active = false;
+            }
         }
 
         void render_block(float* o, ma_uint32 frames)
@@ -169,12 +244,12 @@ namespace lazy100
             {
                 const Msg& m  = queue[t % kQueueSize];
                 const int  ch = (m.channel < 0 || m.channel >= kChannels) ? pick_channel() : m.channel;
-                start_channel(ch, m.pat, false);
+                start_voice(sfxVoice[ch], m.pat, true); // trim trailing silence so the channel frees fast
                 ++t;
             }
             tail.store(t, std::memory_order_release);
 
-            // Handle a new music request (start/stop).
+            // Handle a new music request (start/stop). Sfx voices are left untouched.
             const uint32_t seq = musicSeq.load(std::memory_order_acquire);
             if (seq != lastSeq)
             {
@@ -183,62 +258,45 @@ namespace lazy100
                 if (idx < 0)
                 {
                     musicOn = false;
-                    for (auto& c : channels)
-                        if (c.from_music)
-                            c.active = false;
+                    for (auto& c : musicVoice)
+                        c.active = false;
                 }
                 else
                 {
-                    musicOn    = true;
-                    musicCur   = idx;
-                    musicStart = idx;
-                    musicLoad  = true;
+                    musicOn         = true;
+                    musicCur        = idx;
+                    musicStart      = idx;
+                    musicLoopTarget = idx; // loop back here until a LoopStart pattern overrides it
+                    musicCurFlags   = 0;
+                    musicLoad       = true;
                 }
             }
 
+            // Paused music freezes in place (voices keep their step/phase, sequencer doesn't
+            // advance) while sfx keep playing.
+            const bool paused = musicPauseFlag.load(std::memory_order_relaxed);
+
             for (ma_uint32 f = 0; f < frames; ++f)
             {
-                if (musicLoad)
+                if (musicLoad && !paused)
                 {
                     musicLoad = false;
                     load_music_pattern();
                 }
 
                 double s = 0.0;
-                for (auto& c : channels)
+                for (int c = 0; c < kChannels; ++c)
                 {
-                    if (!c.active)
-                        continue;
-                    const SfxNote& note = c.pat.notes[c.step];
-                    if (note.vol > 0)
-                    {
-                        const double freq = pitch_freq(note.pitch);
-                        const double raw  = wave_sample(static_cast<Wave>(note.wave % static_cast<int>(Wave::Count)),
-                                                        c.phase, c, freq, sampleRate);
-                        // Click-free envelope: short attack in, short release out of each step.
-                        const double atk = std::min(64.0, c.step_samples * 0.1);
-                        const double rel = std::min(512.0, c.step_samples * 0.25);
-                        double       env = 1.0;
-                        if (c.into_step < atk)
-                            env = c.into_step / atk;
-                        else if (c.into_step > c.step_samples - rel)
-                            env = std::max(0.0, (c.step_samples - c.into_step) / rel);
-                        s += raw * env * (note.vol / 7.0) * 0.22;
-                        c.phase += freq / sampleRate;
-                    }
-
-                    c.into_step += 1.0;
-                    if (c.into_step >= c.step_samples)
-                    {
-                        c.into_step = 0.0;
-                        c.phase     = 0.0;
-                        ++c.step;
-                        if (c.step >= SfxPattern::kSteps)
-                            c.active = false;
-                    }
+                    // Sfx has priority on its channel; the music voice keeps stepping
+                    // underneath (muted) so it stays in sync and resumes when the sfx ends.
+                    const bool sfxActive = sfxVoice[c].active;
+                    if (!paused)
+                        step_voice(musicVoice[c], s, !sfxActive);
+                    step_voice(sfxVoice[c], s, true);
                 }
 
-                advance_music_if_idle();
+                if (!paused)
+                    advance_music_if_idle();
 
                 if (s > 1.0)
                     s = 1.0;
@@ -247,6 +305,9 @@ namespace lazy100
                 o[f * 2 + 0] = static_cast<float>(s);
                 o[f * 2 + 1] = static_cast<float>(s);
             }
+
+            // Publish the playback position for the music editor's live indicator.
+            musicPos.store(musicOn ? musicCur : -1, std::memory_order_relaxed);
         }
     };
 
@@ -313,6 +374,7 @@ namespace lazy100
         im.bankBuf[inactive] = bank; // snapshot the whole bank for the audio thread
         im.bankActive.store(inactive, std::memory_order_release);
         im.musicReqIndex = index;
+        im.musicPauseFlag.store(false, std::memory_order_relaxed); // a fresh play is never paused
         im.musicSeq.fetch_add(1, std::memory_order_release);
     }
 
@@ -322,6 +384,15 @@ namespace lazy100
             return;
         Impl& im         = *p_;
         im.musicReqIndex = -1;
+        im.musicPauseFlag.store(false, std::memory_order_relaxed);
         im.musicSeq.fetch_add(1, std::memory_order_release);
     }
+
+    void Audio::pause_music(bool paused)
+    {
+        if (p_)
+            p_->musicPauseFlag.store(paused, std::memory_order_relaxed);
+    }
+
+    int Audio::music_pattern() const { return p_ ? p_->musicPos.load(std::memory_order_relaxed) : -1; }
 } // namespace lazy100
