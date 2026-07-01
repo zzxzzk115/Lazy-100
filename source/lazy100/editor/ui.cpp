@@ -34,14 +34,18 @@ namespace lazy100::ui
         return y + kHdrH + 2; // content start
     }
 
-    bool icon_button(Framebuffer& fb, const Mouse& m, int x, int y, int w, int h, icon::Id ic, bool active)
+    bool icon_button(Framebuffer& fb, const Mouse& m, int x, int y, int w, int h, icon::Id ic, bool active,
+                     int ink, int bg)
     {
-        const bool over = hit(m, x, y, w, h);
-        const u8   bg   = active ? kBtnActive : (over ? kBtnHover : kBtn);
-        fb.rectfill(x, y, x + w - 1, y + h - 1, bg);
+        const bool over  = hit(m, x, y, w, h);
+        // Automatic fill: active/hover shading; `bg` overrides it (brightening a touch on hover).
+        const u8   fill  = bg >= 0 ? static_cast<u8>(over ? kBtnHover : bg)
+                                   : (active ? kBtnActive : (over ? kBtnHover : kBtn));
+        fb.rectfill(x, y, x + w - 1, y + h - 1, fill);
         draw::rect(fb, x, y, x + w - 1, y + h - 1, active ? kBorderHi : kBorder);
-        const u8 ink = active ? kBg : kText; // dark icon on the bright active fill
-        icon::draw(fb, ic, x + (w - icon::kSize) / 2, y + (h - icon::kSize) / 2, ink);
+        // Automatic ink: dark icon on the bright active fill, else primary. `ink` overrides it.
+        const u8 col = ink >= 0 ? static_cast<u8>(ink) : (active ? kBg : kText);
+        icon::draw(fb, ic, x + (w - icon::kSize) / 2, y + (h - icon::kSize) / 2, col);
         return over && m.pressed(Mouse::Left);
     }
 

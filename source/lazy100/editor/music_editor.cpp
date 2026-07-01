@@ -28,9 +28,13 @@ namespace lazy100
 
     void MusicEditor::draw(Console& con, Framebuffer& fb)
     {
-        SoundBank&    bank = con.sounds();
-        MusicPattern& mp   = bank.music[current_];
-        const Mouse&  m    = con.mouse();
+        SoundBank&   bank    = con.sounds();
+        const int    playing = con.audio().music_pattern(); // -1 when stopped
+        // While the sequencer runs, follow the pattern it's playing; otherwise show the edit
+        // cursor. Stopping falls back to current_ (the row you pressed play on).
+        const int     shown = playing >= 0 ? playing : current_;
+        MusicPattern& mp    = bank.music[shown];
+        const Mouse&  m     = con.mouse();
 
         ui::clear(fb, EditorHost::kTabH);
 
@@ -41,16 +45,42 @@ namespace lazy100
         if (ui::icon_button(fb, m, 22, 20, 14, 14, icon::Next))
             current_ = (current_ + 1) % SoundBank::kMusicCount;
         char hdr[16];
-        std::snprintf(hdr, sizeof(hdr), "MUS %02d", current_);
-        font::print(fb, hdr, 42, 21, ui::kText);
-        if (ui::icon_button(fb, m, 268, 20, 20, 14, icon::Play))
-            con.audio().play_music(current_, bank);
-        if (ui::icon_button(fb, m, 292, 20, 20, 14, icon::Stop))
+        const char* fmt = playing < 0 ? "MUS %02d" : (paused_ ? "MUS %02d =" : "MUS %02d >");
+        std::snprintf(hdr, sizeof(hdr), fmt, shown);
+        font::print(fb, hdr, 42, 21, playing >= 0 ? ui::kAccent : ui::kText);
+        // Transport. The Play button becomes Pause while the sequencer runs, and a resume arrow
+        // while paused. Stop (red) halts and rewinds.
+        if (playing < 0)
+        {
+            paused_ = false; // nothing is running, so nothing is paused
+            if (ui::icon_button(fb, m, 268, 20, 20, 14, icon::Play))
+                con.audio().play_music(current_, bank);
+        }
+        else if (!paused_)
+        {
+            if (ui::icon_button(fb, m, 268, 20, 20, 14, icon::Pause))
+            {
+                con.audio().pause_music(true);
+                paused_ = true;
+            }
+        }
+        else if (ui::icon_button(fb, m, 268, 20, 20, 14, icon::Play))
+        {
+            con.audio().pause_music(false);
+            paused_ = false;
+        }
+        // Stop is red (white square) only while the sequencer runs; a plain button when idle.
+        const bool running = playing >= 0;
+        if (ui::icon_button(fb, m, 292, 20, 20, 14, icon::Stop, false, running ? ui::kText : -1,
+                            running ? 8 : -1))
+        {
             con.audio().stop_music();
+            paused_ = false;
+        }
 
         // ---- channel arrangement ----
         const int ph = ui::titled_panel(fb, 2, 40, 316, 150, icon::TabMusic);
-        font::print(fb, "channels play together; patterns chain in sequence", 8, ph + 2, ui::kDim);
+        font::print(fb, "4 channels play together; 'off' rests that channel", 8, ph + 2, ui::kDim);
         for (int c = 0; c < MusicPattern::kChannels; ++c)
         {
             const int y = ph + 16 + c * 30;
@@ -81,9 +111,12 @@ namespace lazy100
 
         ui::help_button(fb, con, m, 250, 20, 4,
                         "MUSIC\n"
+                        "rows chain top-to-bottom; each row's\n"
+                        "4 channels play at once ('off'=rest).\n"
                         "- / + : set each channel's sfx\n"
                         "< > : prev / next pattern\n"
-                        "PLAY / STOP: transport\n"
-                        "speaker: preview one channel");
+                        "PLAY/PAUSE: run/freeze; view follows\n"
+                        "the playing row. STOP: halt + rewind\n"
+                        "(a fully-off row loops the song)");
     }
 } // namespace lazy100

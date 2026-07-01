@@ -39,8 +39,9 @@ namespace lazy100
         int titled_panel(Framebuffer& fb, int x, int y, int w, int h, icon::Id ic);
 
         // An icon-only button; returns true if clicked this frame. `active` shades it as selected.
+        // `ink` overrides the icon color, `bg` the fill (e.g. a red-fill Stop); -1 keeps automatic.
         bool icon_button(Framebuffer& fb, const Mouse& m, int x, int y, int w, int h, icon::Id ic,
-                         bool active = false);
+                         bool active = false, int ink = -1, int bg = -1);
 
         void divider(Framebuffer& fb, int x, int y, int w, u8 c = kBorder);      // horizontal
         void vdivider(Framebuffer& fb, int x, int y, int h, u8 c = kBorder);     // vertical

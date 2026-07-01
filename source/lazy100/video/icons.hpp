@@ -14,6 +14,7 @@ namespace lazy100
         enum Id
         {
             Play = 0,
+            Pause,
             Stop,
             Prev,
             Next,

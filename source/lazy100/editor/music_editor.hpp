@@ -16,6 +16,7 @@ namespace lazy100
         void        draw(Console& con, Framebuffer& fb) override;
 
     private:
-        int current_ = 0; // music pattern index 0..63
+        int  current_ = 0;     // music pattern index 0..63 (edit/play cursor)
+        bool paused_  = false;  // transport is paused (Play button shows a resume arrow)
     };
 } // namespace lazy100
