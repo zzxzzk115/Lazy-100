@@ -4,6 +4,7 @@
 #include "lazy100/console/console.hpp"
 #include "lazy100/editor/ui.hpp"
 #include "lazy100/input/keyboard.hpp"
+#include "lazy100/input/mouse.hpp"
 #include "lazy100/video/draw.hpp"
 #include "lazy100/video/font.hpp"
 #include "lazy100/video/framebuffer.hpp"
@@ -52,6 +53,25 @@ namespace lazy100
             return pos;
         }
 
+        // Codepoint boundary in `s` whose caret x (in pixels from the text origin) is closest
+        // to `px` — maps a mouse click column onto a byte offset.
+        int col_from_x(const std::string& s, int px)
+        {
+            if (px <= 0)
+                return 0;
+            int pos = 0, prevW = 0;
+            while (pos < static_cast<int>(s.size()))
+            {
+                const int nxt = next_cp(s, pos);
+                const int w   = font::text_width(s.substr(0, nxt).c_str());
+                if (px < (prevW + w) / 2) // click fell in the left half of this glyph
+                    return pos;
+                prevW = w;
+                pos   = nxt;
+            }
+            return static_cast<int>(s.size());
+        }
+
         bool is_word(unsigned char c) { return std::isalnum(c) || c == '_'; }
 
         // Lua reserved words.
@@ -61,6 +81,14 @@ namespace lazy100
                 "and",    "break", "do",   "else", "elseif", "end",  "false", "for",  "function", "goto", "if",
                 "in",     "local", "nil",  "not",  "or",     "repeat", "return", "then", "true",   "until", "while"};
             return k;
+        }
+        // Keywords that finish a line/expression on their own: accepting them from the popup
+        // should NOT append a space (they are followed by a newline, not more code).
+        bool trailing_keyword(const std::string& w)
+        {
+            static const std::unordered_set<std::string> t = {"end",  "break", "then",  "do",   "else",
+                                                              "repeat", "nil",  "true",  "false"};
+            return t.count(w) != 0;
         }
         // Lazy-100 API + math builtins + lifecycle callbacks.
         const std::unordered_set<std::string>& builtins()
@@ -199,7 +227,21 @@ namespace lazy100
     void CodeEditor::update(Console& con)
     {
         sync_from(con.code());
-        const Keyboard& kb = con.keyboard();
+        const Keyboard& kb  = con.keyboard();
+        const Mouse&    m   = con.mouse();
+        const int       cx0 = cx_, cy0 = cy_; // remember caret, to detect motion for scroll-follow
+
+        // ---- mouse: wheel scrolls the view; left-click places the caret ----
+        const int lh      = font::line_height();
+        const int statusY = static_cast<int>(kScreenH) - lh - 1;
+        const int rows    = std::max(1, (statusY - kTop) / lh);
+        if (const int w = m.wheel())
+            top_ = std::clamp(top_ - w * 3, 0, std::max(0, static_cast<int>(lines_.size()) - rows));
+        if (m.pressed(Mouse::Left) && m.y() >= kTop && m.y() < statusY)
+        {
+            cy_ = std::clamp(top_ + (m.y() - kTop) / lh, 0, static_cast<int>(lines_.size()) - 1);
+            cx_ = col_from_x(lines_[cy_], m.x() - kGutter + left_); // + left_: account for h-scroll
+        }
 
         // Autocomplete popup captures Up/Down/Tab while it is open.
         refresh_completions();
@@ -318,13 +360,18 @@ namespace lazy100
         flush_to(con.code());
         cache_ = con.code();
         refresh_completions(); // reflect this frame's edits in the popup drawn below
+        caret_moved_ = (cx_ != cx0 || cy_ != cy0); // scroll follows the caret only when it moves
         ++blink_;
     }
 
     std::string CodeEditor::word_prefix() const
     {
         const std::string& line = lines_[cy_];
-        int                a    = cx_;
+        // Only complete at the end of a token: if a word char sits right after the caret
+        // (e.g. the caret was clicked into the middle of an identifier), offer nothing.
+        if (cx_ < static_cast<int>(line.size()) && is_word(static_cast<unsigned char>(line[cx_])))
+            return {};
+        int a = cx_;
         while (a > 0 && is_word(static_cast<unsigned char>(line[a - 1])))
             --a;
         if (a >= cx_ || std::isdigit(static_cast<unsigned char>(line[a])))
@@ -337,6 +384,12 @@ namespace lazy100
         matches_.clear();
         const std::string prefix = word_prefix();
         if (prefix.empty())
+        {
+            comp_sel_ = 0;
+            return;
+        }
+        // Already a complete keyword/builtin? Stop nagging — the word is done.
+        if (keywords().count(prefix) || builtins().count(prefix))
         {
             comp_sel_ = 0;
             return;
@@ -358,8 +411,14 @@ namespace lazy100
         const std::string prefix = word_prefix();
         const int         start  = cx_ - static_cast<int>(prefix.size());
         const char*       word   = matches_[std::clamp(comp_sel_, 0, static_cast<int>(matches_.size()) - 1)];
-        lines_[cy_].replace(start, prefix.size(), word);
-        cx_ = start + static_cast<int>(std::strlen(word));
+        std::string       ins    = word;
+        // Keywords that lead into more code get a trailing space; terminal keywords (end,
+        // break, then, ...) and builtins (which take a '(' next) don't. Skip if already spaced.
+        if (keywords().count(word) && !trailing_keyword(word) &&
+            (cx_ >= static_cast<int>(lines_[cy_].size()) || lines_[cy_][cx_] != ' '))
+            ins += ' ';
+        lines_[cy_].replace(start, prefix.size(), ins);
+        cx_ = start + static_cast<int>(ins.size());
         matches_.clear();
     }
 
@@ -370,14 +429,30 @@ namespace lazy100
         const int statusY = static_cast<int>(kScreenH) - lh - 1;
         const int rows    = std::max(1, (statusY - kTop) / lh);
 
-        // Keep the cursor line on screen.
-        if (cy_ < top_)
-            top_ = cy_;
-        else if (cy_ >= top_ + rows)
-            top_ = cy_ - rows + 1;
+        // Follow the caret only when it moved this frame, so wheel-scrolling can rest away
+        // from the caret instead of snapping back every frame.
+        if (caret_moved_)
+        {
+            if (cy_ < top_)
+                top_ = cy_;
+            else if (cy_ >= top_ + rows)
+                top_ = cy_ - rows + 1;
+        }
+        top_ = std::clamp(top_, 0, std::max(0, static_cast<int>(lines_.size()) - 1));
+
+        // Horizontal scroll: keep the caret's pixel column in view so long lines stay reachable.
+        const int cxpx  = font::text_width(lines_[cy_].substr(0, cx_).c_str());
+        const int viewW = static_cast<int>(kScreenW) - kGutter - 2; // visible code width in px
+        if (caret_moved_)
+        {
+            if (cxpx < left_)
+                left_ = cxpx;
+            else if (cxpx > left_ + viewW)
+                left_ = cxpx - viewW;
+        }
+        left_ = std::max(0, left_);
 
         fb.rectfill(0, EditorHost::kTabH, static_cast<int>(kScreenW) - 1, static_cast<int>(kScreenH) - 1, 0);
-        draw::line(fb, kGutter - 3, kTop, kGutter - 3, statusY - 2, ui::kBorder); // gutter divider
 
         int caretX = kGutter, caretY = kTop;
         for (int r = 0; r < rows; ++r)
@@ -387,21 +462,24 @@ namespace lazy100
                 break;
             const int y = kTop + r * lh;
 
+            const std::string& text = lines_[li];
+            draw_line(fb, text, kGutter - left_, y); // syntax-highlighted, scrolled horizontally
+
+            // Mask whatever scrolled under the gutter, then draw the line number over it.
+            fb.rectfill(0, y, kGutter - 1, y + lh - 1, 0);
             char num[8];
             std::snprintf(num, sizeof(num), "%3d", li + 1);
             font::print(fb, num, 1, y, li == cy_ ? ui::kDim : 5); // line-number gutter
 
-            const std::string& text = lines_[li];
-            draw_line(fb, text, kGutter, y); // syntax-highlighted
-
             if (li == cy_)
             {
-                caretX = kGutter + font::text_width(text.substr(0, cx_).c_str());
+                caretX = kGutter + cxpx - left_;
                 caretY = y;
                 if ((blink_ / 15) % 2 == 0)
                     draw::line(fb, caretX, y, caretX, y + lh - 1, 7);
             }
         }
+        draw::line(fb, kGutter - 3, kTop, kGutter - 3, statusY - 2, ui::kBorder); // gutter divider (over masks)
 
         // Status line.
         draw::line(fb, 0, statusY - 1, static_cast<int>(kScreenW) - 1, statusY - 1, ui::kBorder);
@@ -436,6 +514,7 @@ namespace lazy100
         ui::help_button(fb, con, con.mouse(), static_cast<int>(kScreenW) - 15, statusY - 1, 5,
                         "CODE\n"
                         "type to edit; Tab: autocomplete\n"
+                        "click: place caret; wheel: scroll\n"
                         "up/down while list open: pick\n"
                         "arrows / home / end / pgup-dn\n"
                         "ctrl+tab: switch editor\n"

@@ -32,7 +32,9 @@ namespace lazy100
         int                      cx_    = 0; // cursor byte offset within the line (codepoint boundary)
         int                      cy_    = 0; // cursor line index
         int                      top_   = 0; // first visible line
+        int                      left_  = 0; // horizontal scroll, in pixels (follows the caret)
         int                      blink_ = 0; // caret blink counter
+        bool                     caret_moved_ = true; // did the caret move this frame? (scroll-follow gate)
 
         std::vector<const char*> matches_; // live autocomplete candidates for the current word
         int                      comp_sel_ = 0; // selected candidate in the popup
