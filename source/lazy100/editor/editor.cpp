@@ -2,6 +2,7 @@
 
 #include "lazy100/console/console.hpp"
 #include "lazy100/console/config.hpp"
+#include "lazy100/editor/code_editor.hpp"
 #include "lazy100/editor/map_editor.hpp"
 #include "lazy100/editor/sprite_editor.hpp"
 #include "lazy100/input/mouse.hpp"
@@ -28,7 +29,7 @@ namespace lazy100
 
     EditorHost::EditorHost()
     {
-        editors_.push_back(std::make_unique<PlaceholderEditor>("CODE"));
+        editors_.push_back(std::make_unique<CodeEditor>());
         editors_.push_back(std::make_unique<SpriteEditor>());
         editors_.push_back(std::make_unique<MapEditor>());
         editors_.push_back(std::make_unique<PlaceholderEditor>("SFX"));
