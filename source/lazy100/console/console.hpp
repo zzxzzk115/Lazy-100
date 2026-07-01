@@ -24,6 +24,7 @@ namespace lazy100
     // ESC toggles between them; the shell `run`/`edit` commands switch explicitly.
     enum class ConsoleMode
     {
+        Boot, // power-on splash; auto-advances to Shell
         Shell,
         Running,
         Editor
@@ -94,6 +95,9 @@ namespace lazy100
         ConsoleMode mode_      = ConsoleMode::Shell;
         bool        has_cart_  = false;
         bool        running_   = true;
+
+        double      boot_t_    = 0.0;                 // seconds elapsed in the power-on splash
+        ConsoleMode boot_next_ = ConsoleMode::Shell;  // mode to enter once the splash finishes
 
         double dt_       = 0.0; // last frame delta (seconds)
         int    hover_id_ = -1;  // hotspot currently being hover-timed

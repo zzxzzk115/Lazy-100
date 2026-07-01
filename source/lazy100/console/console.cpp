@@ -2,6 +2,7 @@
 
 #include "lazy100/cart/cart.hpp"
 #include "lazy100/common/log.hpp"
+#include "lazy100/console/boot.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/vfs/vfs.hpp"
 #include "lazy100/video/cursor.hpp"
@@ -49,12 +50,16 @@ namespace lazy100
         new_cart();
 
         if (cart_path && load_cart_file(cart_path))
-            start_cart(); // launched with a cart -> play it
+            start_cart(); // launched with a cart -> play it straight away (no splash)
         else
         {
             if (cart_path)
                 LZ_WARN("cart failed to load: %s", cart_path);
-            mode_ = ConsoleMode::Shell; // bare boot -> the command line
+            // Bare boot -> power-on splash, then drop to the command line.
+            boot_next_ = ConsoleMode::Shell;
+            boot_t_    = 0.0;
+            mode_      = ConsoleMode::Boot;
+            audio_.play_sfx(boot::jingle(), 0);
         }
 
         LZ_INFO("console booted (%ux%u virtual, %ux%u window)", kScreenW, kScreenH, w, h);
@@ -158,8 +163,9 @@ namespace lazy100
             mouse_.update(window_);
             input_.poll(); // live held state for btn()
 
-            // ESC: Running -> Editor, else toggle Shell <-> Editor.
-            if (keyboard_.pressed(Keyboard::Escape))
+            // ESC: Running -> Editor, else toggle Shell <-> Editor. (The splash handles its own
+            // keys below, so don't let ESC hijack it here.)
+            if (mode_ != ConsoleMode::Boot && keyboard_.pressed(Keyboard::Escape))
             {
                 const ConsoleMode prev = mode_;
                 mode_                   = (mode_ == ConsoleMode::Shell) ? ConsoleMode::Editor
@@ -171,6 +177,18 @@ namespace lazy100
 
             switch (mode_)
             {
+                case ConsoleMode::Boot:
+                {
+                    acc = 0.0;
+                    boot_t_ += dt;
+                    boot::draw(framebuffer_, boot_t_);
+                    const bool skip = keyboard_.pressed(Keyboard::Return) ||
+                                      keyboard_.pressed(Keyboard::Escape) || !keyboard_.text().empty() ||
+                                      mouse_.pressed(Mouse::Left);
+                    if (boot_t_ >= boot::kDuration || skip)
+                        mode_ = boot_next_;
+                    break;
+                }
                 case ConsoleMode::Running:
                 {
                     // 30 Hz, or 60 Hz if the cart defines _update60. Fixed logic step; render
