@@ -13,7 +13,8 @@ namespace lazy100
 
         void open_and_bind()
         {
-            lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::table, sol::lib::string);
+            lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::table, sol::lib::string,
+                               sol::lib::coroutine); // coroutine: cocreate/coresume/costatus aliases
             bind_api(lua, *console);
         }
     };

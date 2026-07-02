@@ -20,14 +20,14 @@ function _draw()
   line(8, 16, 311, 231, 8)
   line(311, 16, 8, 231, 12)
 
-  -- a bouncing filled circle
-  local bx = cx + math.floor(80 * cos(t() * 1.7))
-  local by = cy + math.floor(70 * sin(t() * 2.3))
+  -- a bouncing filled circle (trig is in turns: 0..1 = one revolution)
+  local bx = cx + math.floor(80 * cos(t() * 0.27))
+  local by = cy + math.floor(70 * sin(t() * 0.37))
   circfill(bx, by, 12, 10)
   circ(bx, by, 12, 7)
 
   -- a pulsing ring in the center
-  local r = 20 + math.floor(10 * sin(t() * 3))
+  local r = 20 + math.floor(10 * sin(t() * 0.48))
   circ(160, 120, r, 14)
 
   -- text via the built-in font

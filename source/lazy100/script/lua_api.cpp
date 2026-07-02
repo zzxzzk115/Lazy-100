@@ -33,7 +33,7 @@ namespace lazy100
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         }
 
-        // Lua numbers are doubles; the console floors coordinates (PICO-8 semantics) so sol2
+        // Lua numbers are doubles; the console floors coordinates so sol2
         // never has to reject a fractional float as an int argument.
         int fi(double v) { return static_cast<int>(std::floor(v)); }
         int fi(sol::optional<double> v, int def) { return v ? fi(*v) : def; }
@@ -77,46 +77,77 @@ namespace lazy100
         // Shape pen: resolve a color arg, then apply the draw-palette remap.
         auto pen = [dpal](sol::optional<double> c, u8 def) -> u8 { return dpal[col(c, def)]; };
 
+        // camera() scroll offset: world coordinate -> screen coordinate for every draw call.
+        auto camx = [&console](double v) { return fi(v) - console.cam_x(); };
+        auto camy = [&console](double v) { return fi(v) - console.cam_y(); };
+
         // ---- graphics (coords floored; pen remapped by pal()) ----
         lua.set_function("cls", [&fb](sol::optional<double> c) { fb.cls(col(c, 0)); });
         lua.set_function("pset",
-                         [&fb, pen](double x, double y, sol::optional<double> c) { fb.pset(fi(x), fi(y), pen(c, 7)); });
-        lua.set_function("pget", [&fb](double x, double y) { return static_cast<int>(fb.pget(fi(x), fi(y))); });
+                         [&fb, pen, camx, camy](double x, double y, sol::optional<double> c)
+                         { fb.pset(camx(x), camy(y), pen(c, 7)); });
+        lua.set_function("pget", [&fb, camx, camy](double x, double y)
+                         { return static_cast<int>(fb.pget(camx(x), camy(y))); });
         lua.set_function("rectfill",
-                         [&fb, pen](double x0, double y0, double x1, double y1, sol::optional<double> c)
-                         { fb.rectfill(fi(x0), fi(y0), fi(x1), fi(y1), pen(c, 7)); });
+                         [&fb, pen, camx, camy](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { fb.rectfill(camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
         lua.set_function("rect",
-                         [&fb, pen](double x0, double y0, double x1, double y1, sol::optional<double> c)
-                         { draw::rect(fb, fi(x0), fi(y0), fi(x1), fi(y1), pen(c, 7)); });
+                         [&fb, pen, camx, camy](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { draw::rect(fb, camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
         lua.set_function("line",
-                         [&fb, pen](double x0, double y0, double x1, double y1, sol::optional<double> c)
-                         { draw::line(fb, fi(x0), fi(y0), fi(x1), fi(y1), pen(c, 7)); });
+                         [&fb, pen, camx, camy](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { draw::line(fb, camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
         lua.set_function("circ",
-                         [&fb, pen](double x, double y, double r, sol::optional<double> c)
-                         { draw::circ(fb, fi(x), fi(y), fi(r), pen(c, 7)); });
+                         [&fb, pen, camx, camy](double x, double y, double r, sol::optional<double> c)
+                         { draw::circ(fb, camx(x), camy(y), fi(r), pen(c, 7)); });
         lua.set_function("circfill",
-                         [&fb, pen](double x, double y, double r, sol::optional<double> c)
-                         { draw::circfill(fb, fi(x), fi(y), fi(r), pen(c, 7)); });
+                         [&fb, pen, camx, camy](double x, double y, double r, sol::optional<double> c)
+                         { draw::circfill(fb, camx(x), camy(y), fi(r), pen(c, 7)); });
+        lua.set_function("oval",
+                         [&fb, pen, camx, camy](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { draw::oval(fb, camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
+        lua.set_function("ovalfill",
+                         [&fb, pen, camx, camy](double x0, double y0, double x1, double y1, sol::optional<double> c)
+                         { draw::ovalfill(fb, camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
         lua.set_function("print",
-                         [&fb, pen](sol::object text, sol::optional<double> x, sol::optional<double> y,
-                                    sol::optional<double> c)
-                         { return font::print(fb, to_text(text).c_str(), fi(x, 0), fi(y, 0), pen(c, 7)); });
+                         [&fb, pen, camx, camy](sol::object text, sol::optional<double> x, sol::optional<double> y,
+                                                sol::optional<double> c)
+                         {
+                             return font::print(fb, to_text(text).c_str(), x ? camx(*x) : 0, y ? camy(*y) : 0,
+                                                pen(c, 7));
+                         });
+
+        // camera([x, y]): set the draw offset; no args resets it.
+        lua.set_function("camera",
+                         [&console](sol::optional<double> x, sol::optional<double> y)
+                         { console.set_camera(x ? fi(*x) : 0, y ? fi(*y) : 0); });
+        // clip([x, y, w, h]): restrict drawing to a screen-space rectangle; no args resets it.
+        lua.set_function("clip",
+                         [&fb](sol::optional<double> x, sol::optional<double> y, sol::optional<double> w,
+                               sol::optional<double> h)
+                         {
+                             if (x && y && w && h)
+                                 fb.clip(fi(*x), fi(*y), fi(*w), fi(*h));
+                             else
+                                 fb.clip_reset();
+                         });
 
         // ---- sprites ----
         lua.set_function("spr",
-                         [&sheet, &fb, dpal, trans](double n, double x, double y, sol::optional<double> w,
-                                                    sol::optional<double> h, sol::optional<bool> fx,
-                                                    sol::optional<bool> fy)
+                         [&sheet, &fb, dpal, trans, camx, camy](double n, double x, double y, sol::optional<double> w,
+                                                                sol::optional<double> h, sol::optional<bool> fx,
+                                                                sol::optional<bool> fy)
                          {
-                             sheet.spr(fb, fi(n), fi(x), fi(y), fi(w, 1), fi(h, 1), fx.value_or(false),
+                             sheet.spr(fb, fi(n), camx(x), camy(y), fi(w, 1), fi(h, 1), fx.value_or(false),
                                        fy.value_or(false), dpal, trans);
                          });
         lua.set_function("sspr",
-                         [&sheet, &fb, dpal, trans](double sx, double sy, double sw, double sh, double dx, double dy,
-                                                    sol::optional<double> dw, sol::optional<double> dh,
-                                                    sol::optional<bool> fx, sol::optional<bool> fy)
+                         [&sheet, &fb, dpal, trans, camx, camy](double sx, double sy, double sw, double sh, double dx,
+                                                                double dy, sol::optional<double> dw,
+                                                                sol::optional<double> dh, sol::optional<bool> fx,
+                                                                sol::optional<bool> fy)
                          {
-                             sheet.sspr(fb, fi(sx), fi(sy), fi(sw), fi(sh), fi(dx), fi(dy), fi(dw, fi(sw)),
+                             sheet.sspr(fb, fi(sx), fi(sy), fi(sw), fi(sh), camx(dx), camy(dy), fi(dw, fi(sw)),
                                         fi(dh, fi(sh)), fx.value_or(false), fy.value_or(false), dpal, trans);
                          });
         lua.set_function("sget", [&sheet](double x, double y) { return static_cast<int>(sheet.get(fi(x), fi(y))); });
@@ -147,12 +178,12 @@ namespace lazy100
                          { world.set(fi(x), fi(y), static_cast<u8>(fi(v, 0) & 0xff)); });
         lua.set_function(
             "map",
-            [&world, &sheet, &fb, dpal, trans](sol::optional<double> cx, sol::optional<double> cy,
-                                               sol::optional<double> sx, sol::optional<double> sy,
-                                               sol::optional<double> cw, sol::optional<double> ch)
+            [&world, &sheet, &fb, dpal, trans, camx, camy](sol::optional<double> cx, sol::optional<double> cy,
+                                                           sol::optional<double> sx, sol::optional<double> sy,
+                                                           sol::optional<double> cw, sol::optional<double> ch)
             {
                 const int cel_x = fi(cx, 0), cel_y = fi(cy, 0);
-                const int scr_x = fi(sx, 0), scr_y = fi(sy, 0);
+                const int scr_x = sx ? camx(*sx) : camx(0.0), scr_y = sy ? camy(*sy) : camy(0.0);
                 const int cel_w = fi(cw, Map::kW), cel_h = fi(ch, Map::kH);
                 for (int j = 0; j < cel_h; ++j)
                     for (int i = 0; i < cel_w; ++i)
@@ -247,17 +278,150 @@ namespace lazy100
                          { return std::max(std::min(a, b), std::min(std::max(a, b), c)); });
         lua.set_function("sgn", [](double x) { return x < 0.0 ? -1.0 : 1.0; });
         lua.set_function("sqrt", [](double x) { return std::sqrt(x); });
-        lua.set_function("sin", [](double x) { return std::sin(x); });
-        lua.set_function("cos", [](double x) { return std::cos(x); });
-        lua.set_function("atan2", [](double y, double x) { return std::atan2(y, x); });
-        lua.set_function("rnd",
-                         [](sol::optional<double> x)
+        // Trig works in turns (0..1 = one full revolution) with the screen's y axis pointing
+        // down: sin is negated, and atan2(dx, dy) returns the vector's angle in turns,
+        // counter-clockwise from east. sin(0.25) == -1 (up), atan2(0, 1) == 0.75 (down).
+        constexpr double kTau = 6.28318530717958647692;
+        lua.set_function("sin", [kTau](double x) { return -std::sin(x * kTau); });
+        lua.set_function("cos", [kTau](double x) { return std::cos(x * kTau); });
+        lua.set_function("atan2",
+                         [kTau](double dx, double dy)
                          {
-                             std::uniform_real_distribution<double> d(0.0, x.value_or(1.0));
-                             return d(rng());
+                             double a = std::atan2(-dy, dx) / kTau;
+                             return a < 0.0 ? a + 1.0 : a;
+                         });
+        // rnd(n) -> [0, n); rnd() -> [0, 1); rnd(table) -> a random element.
+        lua.set_function("rnd",
+                         [](sol::this_state ts, sol::optional<sol::object> arg) -> sol::object
+                         {
+                             sol::state_view L(ts);
+                             if (arg && arg->is<sol::table>())
+                             {
+                                 sol::table   t = arg->as<sol::table>();
+                                 const size_t n = t.size();
+                                 if (n == 0)
+                                     return sol::make_object(L, sol::lua_nil);
+                                 std::uniform_int_distribution<size_t> d(1, n);
+                                 return t.get<sol::object>(d(rng()));
+                             }
+                             const double mx = (arg && arg->is<double>()) ? arg->as<double>() : 1.0;
+                             std::uniform_real_distribution<double> d(0.0, mx);
+                             return sol::make_object(L, d(rng()));
                          });
         lua.set_function("srand", [](sol::optional<double> s) { rng().seed(static_cast<unsigned>(s.value_or(0.0))); });
         lua.set_function("t", []() { return now_seconds(); });
         lua.set_function("time", []() { return now_seconds(); });
+
+        // ---- cart save data (cartdata/dset/dget) ----
+        // cartdata(id) opens the cart's 64-number save slot (persisted under saves/<id>.txt);
+        // dset writes through immediately, dget reads 0 for unset slots or before cartdata().
+        lua.set_function("cartdata",
+                         [&console](const std::string& id) { return console.cartdata_open(id); });
+        lua.set_function("dget", [&console](double i) { return console.cartdata_get(fi(i)); });
+        lua.set_function("dset", [&console](double i, double v) { console.cartdata_set(fi(i), v); });
+
+        // ---- stat(n): console state queries (devkit mouse; unknown ids read 0) ----
+        lua.set_function("stat",
+                         [&console](double n) -> double
+                         {
+                             switch (fi(n))
+                             {
+                                 case 32: return console.mouse().x();
+                                 case 33: return console.mouse().y();
+                                 case 34: // button bitfield: 1 left, 2 right, 4 middle
+                                     return (console.mouse().down(Mouse::Left) ? 1.0 : 0.0) +
+                                            (console.mouse().down(Mouse::Right) ? 2.0 : 0.0) +
+                                            (console.mouse().down(Mouse::Middle) ? 4.0 : 0.0);
+                                 default: return 0.0;
+                             }
+                         });
+
+        // ---- table/string helpers + coroutine aliases carts expect, and harmless stubs so
+        // ported code doesn't crash on features the console doesn't model (raw memory, pause
+        // menu, manual flip). Registered as plain Lua for natural semantics. ----
+        lua.script(R"lua(
+            function add(t, v, pos)
+                if t == nil then return end
+                if pos then table.insert(t, pos, v) else t[#t + 1] = v end
+                return v
+            end
+            function del(t, v)
+                if t == nil then return end
+                for i = 1, #t do
+                    if t[i] == v then table.remove(t, i) return v end
+                end
+            end
+            function deli(t, i)
+                if t == nil then return end
+                if i == nil then return table.remove(t) end
+                return table.remove(t, i)
+            end
+            function count(t, v)
+                if t == nil then return 0 end
+                if v == nil then return #t end
+                local n = 0
+                for i = 1, #t do if t[i] == v then n = n + 1 end end
+                return n
+            end
+            function all(t)
+                local i = 0
+                return function()
+                    if t == nil then return nil end
+                    i = i + 1
+                    return t[i]
+                end
+            end
+            function foreach(t, f) for v in all(t) do f(v) end end
+
+            sub = string.sub
+            function tostr(v, hex)
+                if hex and type(v) == "number" then return string.format("0x%x", math.floor(v)) end
+                if v == nil then return "[nil]" end
+                return tostring(v)
+            end
+            function tonum(v) return tonumber(v) end
+            function chr(...)
+                local s = ""
+                for _, n in ipairs({...}) do s = s .. string.char(math.floor(n) % 256) end
+                return s
+            end
+            function ord(s, i) if s == nil then return nil end return string.byte(s, i or 1) end
+            function split(s, sep, conv)
+                if s == nil then return {} end
+                sep = sep or ","
+                if conv == nil then conv = true end
+                local out = {}
+                if sep == "" then
+                    for i = 1, #s do
+                        local c = string.sub(s, i, i)
+                        out[#out + 1] = (conv and tonumber(c)) or c
+                    end
+                    return out
+                end
+                local start = 1
+                while true do
+                    local pos = string.find(s, sep, start, true)
+                    local piece = pos and string.sub(s, start, pos - 1) or string.sub(s, start)
+                    out[#out + 1] = (conv and tonumber(piece)) or piece
+                    if not pos then break end
+                    start = pos + #sep
+                end
+                return out
+            end
+
+            cocreate, coresume, costatus, yield =
+                coroutine.create, coroutine.resume, coroutine.status, coroutine.yield
+
+            function menuitem() end
+            function flip() end
+            function peek() return 0 end
+            function poke() end
+            peek2, poke2, peek4, poke4 = peek, poke, peek, poke
+            function memcpy() end
+            function memset() end
+            function reload() end
+            function cstore() end
+            function extcmd() end
+        )lua");
     }
 } // namespace lazy100
