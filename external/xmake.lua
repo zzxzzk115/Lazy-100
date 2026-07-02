@@ -20,3 +20,9 @@ add_requires("miniaudio")
 add_requires("lua 5.4")
 add_requires("sol2")
 add_requires("stb") -- stb_truetype: runtime glyph rasterization (CJK + Latin)
+add_requires("nlohmann_json") -- games catalog (games.json) parsing for the explore browser
+if not is_plat("wasm") then
+    -- explore downloads (catalog + carts + previews) on desktop; wasm uses emscripten_fetch
+    -- instead (built-in, -sFETCH), so no curl there.
+    add_requires("libcurl")
+end

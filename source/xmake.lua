@@ -5,5 +5,9 @@ target("lazy100-static")
     add_files("lazy100/**.cpp")
     add_includedirs(os.scriptdir(), {public = true})
     add_headerfiles("lazy100/**.hpp")
-    add_packages("libsdl3", "miniaudio", "lua", "sol2", "vri", "stb", "vfilesystem", {public = true})
+    add_packages("libsdl3", "miniaudio", "lua", "sol2", "vri", "stb", "vfilesystem", "nlohmann_json",
+                 {public = true})
+    if not is_plat("wasm") then
+        add_packages("libcurl", {public = true}) -- net::Fetch desktop backend
+    end
 target_end()
