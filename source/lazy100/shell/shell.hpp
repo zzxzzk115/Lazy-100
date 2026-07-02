@@ -8,7 +8,7 @@ namespace lazy100
     class Console;
     class Framebuffer;
 
-    // The boot command line (PICO-8 boot screen crossed with a Linux shell): a working
+    // The boot command line (a retro boot screen crossed with a Linux shell): a working
     // directory + ls/cd/pwd, Tab completion, and Up/Down history. Draws itself with the
     // built-in font. Cart commands (load/save/run/new) resolve relative to the cwd.
     class Shell

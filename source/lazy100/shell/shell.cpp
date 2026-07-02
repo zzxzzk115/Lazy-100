@@ -15,8 +15,8 @@ namespace lazy100
     {
         namespace fs = std::filesystem;
 
-        const char* const kCommands[] = {"help", "ls",   "cd",   "pwd", "cls", "exit",
-                                         "run",  "edit", "load", "save", "new"};
+        const char* const kCommands[] = {"help", "ls",   "cd",   "pwd",  "cls", "exit",
+                                         "run",  "edit", "load", "save", "new", "explore"};
 
         // Path shown to the user, without the sandbox "carts/" prefix.
         std::string strip_root(const std::string& p)
@@ -80,7 +80,7 @@ namespace lazy100
 
     Shell::Shell()
     {
-        print_line("Lazy-100");
+        print_line("LAZY-100");
         print_line("type 'help' for commands, ESC for the editor");
     }
 
@@ -95,8 +95,9 @@ namespace lazy100
 
         if (cmd == "help")
         {
-            print_line("commands: help ls cd pwd cls run edit load save new exit");
+            print_line("commands: help ls cd pwd cls run edit load save new explore exit");
             print_line("save foo.png / load foo.png: cart as a shareable image");
+            print_line("explore: browse & download games from the online catalog");
         }
         else if (cmd == "cls")
             lines_.clear();
@@ -106,6 +107,8 @@ namespace lazy100
             print_line(display_cwd(cwd_));
         else if (cmd == "edit")
             con.set_mode(ConsoleMode::Editor);
+        else if (cmd == "explore")
+            con.set_mode(ConsoleMode::Explore);
         else if (cmd == "run")
         {
             if (!con.start_cart())
@@ -179,6 +182,14 @@ namespace lazy100
             if (arg.empty())
             {
                 print_line("usage: save <name>");
+                return;
+            }
+            // Blank means EVERY section is untouched - sprites-only or music-only carts (art
+            // or tunes drafted before any code) are real work and must save fine.
+            if (con.cart_blank())
+            {
+                print_line("nothing to save: cart is empty");
+                print_line("load one, or draw/compose/code something first");
                 return;
             }
             std::string name = arg;
