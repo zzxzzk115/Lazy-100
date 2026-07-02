@@ -5,6 +5,7 @@
 #include "lazy100/video/framebuffer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace lazy100
@@ -35,6 +36,71 @@ namespace lazy100
         note(13, 48, 6); // (held sparkle)
         note(14, 48, 5);
         return p; // remaining steps default to vol 0 (silent)
+    }
+
+    void boot::draw_warmup(Framebuffer& fb, double t)
+    {
+        fb.cls(0);
+        const int   W          = static_cast<int>(kScreenW);
+        const int   H          = static_cast<int>(kScreenH);
+        const u8    rainbow[6] = {8, 9, 10, 11, 12, 14};
+        const char* msg        = "booting...";
+        const int   len        = static_cast<int>(std::strlen(msg));
+
+        int tw = 0; // total pixel width for centering
+        for (int i = 0; i < len; ++i)
+        {
+            const char c[2] = {msg[i], 0};
+            tw += font::text_width(c);
+        }
+
+        int       x     = (W - tw) / 2;
+        const int baseY = (H - font::line_height()) / 2;
+        for (int i = 0; i < len; ++i)
+        {
+            const char c[2] = {msg[i], 0};
+            // Each letter hops on a staggered phase and cycles through the rainbow.
+            const int dy  = -static_cast<int>(std::max(0.0, std::sin(t * 7.0 - i * 0.6)) * 5.0);
+            const u8  col = rainbow[(i + static_cast<int>(t * 6)) % 6];
+            font::print(fb, c, x + 1, baseY + dy + 1, 1); // drop shadow
+            font::print(fb, c, x, baseY + dy, col);
+            x += font::text_width(c);
+        }
+    }
+
+    void boot::draw_web_gate(Framebuffer& fb, double t)
+    {
+        fb.cls(0);
+        const int W          = static_cast<int>(kScreenW);
+        const int H          = static_cast<int>(kScreenH);
+        const int lh         = font::line_height();
+        const u8  rainbow[6] = {8, 9, 10, 11, 12, 14}; // red orange yellow green blue pink
+
+        // "LAZY-100" in the boot splash's per-letter rainbow (bold, drop-shadowed).
+        const char* title = "LAZY-100";
+        const int   len   = static_cast<int>(std::strlen(title));
+        int         tw    = 0;
+        for (int i = 0; i < len; ++i)
+        {
+            const char c[2] = {title[i], 0};
+            tw += font::text_width(c);
+        }
+        int       x = (W - tw) / 2;
+        const int y = H / 2 - lh - 3;
+        for (int i = 0; i < len; ++i)
+        {
+            const char c[2] = {title[i], 0};
+            const u8   col  = rainbow[(i + static_cast<int>(t * 6)) % 6];
+            font::print(fb, c, x + 1, y + 1, 1); // shadow
+            font::print(fb, c, x, y, col);       // face
+            font::print(fb, c, x + 1, y, col);   // double-strike for a bold weight
+            x += font::text_width(c);
+        }
+
+        // Blinking call to action, cycling through the rainbow so it isn't a flat single colour.
+        // "press any key" (not "click"): the cursor isn't shown until the console is running.
+        if ((static_cast<int>(t * 2.6) & 1) == 0)
+            center(fb, "press any key to start", H / 2 + 6, rainbow[static_cast<int>(t * 3) % 6]);
     }
 
     void boot::draw(Framebuffer& fb, double t)
