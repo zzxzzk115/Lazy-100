@@ -62,8 +62,10 @@ namespace lazy100
         u32                   w = 0, h = 0;
         u64                   frameValue = 0;
 
-        // Indexed framebuffer -> texture
-        VriFormat      indexFormat = VriFormat_R8_UINT;
+        // Indexed framebuffer -> texture. R8_UNORM (not R8_UINT): integer textures upload via
+        // GL_RED_INTEGER, which the GL backend's PBO path rejects; a normalized R8 uploads
+        // normally and the shader recovers the 0..255 index with round(v * 255).
+        VriFormat      indexFormat = VriFormat_R8_UNORM;
         VriTexture*    indexTex    = nullptr;
         VriDescriptor* indexView   = nullptr;
         bool           indexInit   = false;
@@ -139,7 +141,16 @@ namespace lazy100
         }
         im.c.GetQueue(im.dev, VriQueueType_Graphics, 0, &im.queue);
 
-        VriWindowHandle  wh = vriWindowHandleFromSDL3(window.handle());
+        // On the web there's no native window handle: SDL renders into the page's HTML canvas and
+        // VRI's swapchain targets it by CSS selector, not an SDL handle (vriWindowHandleFromSDL3
+        // has no web branch by design). SDL's Emscripten port uses the default canvas id "#canvas".
+#if defined(__EMSCRIPTEN__)
+        VriWindowHandle wh {};
+        wh.type                = VriWindowSystem_Web;
+        wh.handle.web.selector = "#canvas";
+#else
+        VriWindowHandle wh = vriWindowHandleFromSDL3(window.handle());
+#endif
         VriSwapChainDesc scd {};
         scd.window      = wh;
         scd.queue       = im.queue;
@@ -159,12 +170,8 @@ namespace lazy100
         im.c.CreateFence(im.dev, 0, &im.fence);
 
         // ---- index texture (R8_UINT, sampled) ----
-        if (!(im.c.GetFormatSupport(im.dev, VriFormat_R8_UINT) & VriFormatSupport_Texture))
-        {
-            // Universally supported on desktop Vulkan; the UNORM fallback would need a
-            // separate float-sampling shader, deferred until a backend actually needs it.
-            LZ_WARN("R8_UINT not reported as a sampleable texture format; proceeding anyway");
-        }
+        if (!(im.c.GetFormatSupport(im.dev, im.indexFormat) & VriFormatSupport_Texture))
+            LZ_WARN("R8_UNORM not reported as a sampleable texture format; proceeding anyway");
         VriTextureDesc itd {};
         itd.type           = VriTextureType_2D;
         itd.format         = im.indexFormat;

@@ -12,9 +12,12 @@ struct Palette
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Palette> uPalette;
-// The SPIR-V sampled-image format must match the R8_UINT view, or Slang defaults it to
-// R32ui and the texel fetch is undefined (Vulkan format-validation). Pin it to r8ui.
-[[vk::image_format("r8ui")]] [[vk::binding(1, 0)]] Texture2D<uint> uIndex;
+// The index framebuffer is an R8_UNORM texture, not R8_UINT: integer textures upload through
+// GL_RED_INTEGER, a path the GL backend's PBO upload doesn't take (GL_INVALID_OPERATION),
+// whereas a normalized R8 uploads normally. 8-bit unorm has exactly 256 levels, so the palette
+// index round-trips exactly (recover it with round(v * 255)). Pin the format to r8 so Slang
+// doesn't default the sampled image to something else.
+[[vk::image_format("r8")]] [[vk::binding(1, 0)]] Texture2D<float> uIndex;
 
 struct VSOut
 {
@@ -39,7 +42,7 @@ float4 fragmentMain(VSOut i): SV_Target
 {
     int2 dim = int2(320, 240);
     int2 p   = clamp(int2(i.uv * float2(dim)), int2(0, 0), dim - 1);
-    uint idx = uIndex.Load(int3(p, 0));
+    uint idx = uint(uIndex.Load(int3(p, 0)) * 255.0 + 0.5); // R8_UNORM [0,1] -> palette index [0,255]
     uint packed = uPalette.colors[idx >> 2][idx & 3];
     return float4(float(packed & 0xffu), float((packed >> 8) & 0xffu), float((packed >> 16) & 0xffu), 255.0) /
            255.0;
