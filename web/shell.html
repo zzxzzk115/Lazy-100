@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAZY-100</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <style>
+    /* Colours are Lazy-100's own palette (the boot-splash set), so the page matches the console. */
+    :root {
+      --bg-0:#000000; --bg-1:#1d2b53; --panel:#1d2b53; --line:#5f574f;
+      --text:#fff1e8; --muted:#c2c3c7; --accent:#ff77a8; --accent-2:#29adff;
+      --err:#ff004d; --warn:#ffa300; --ok:#00e436; --cart:#7e2553; --px:3px;
+      --pixel:"Press Start 2P", ui-monospace, monospace;
+      --term:"VT323", ui-monospace, "Cascadia Mono", monospace;
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; height:100%; overflow:hidden; color:var(--text);
+      font-family:var(--term); font-size:18px; letter-spacing:.5px;
+      background:linear-gradient(180deg, var(--bg-1), var(--bg-0));
+      image-rendering:pixelated; }
+    /* Pixel scrollbars. */
+    *::-webkit-scrollbar { width:14px; height:14px; }
+    *::-webkit-scrollbar-track { background:var(--bg-0); box-shadow:inset 0 0 0 3px var(--bg-1); }
+    *::-webkit-scrollbar-thumb { background:var(--accent-2); border:3px solid var(--bg-0); }
+    *::-webkit-scrollbar-thumb:hover { background:var(--accent); }
+    *::-webkit-scrollbar-corner { background:var(--bg-0); }
+    * { scrollbar-width:thin; scrollbar-color:var(--accent-2) var(--bg-0); }
+    .layout { display:grid; grid-template-rows:auto 1fr auto; gap:12px; height:100%; padding:14px; }
+    .topbar { display:flex; align-items:center; gap:12px; padding:10px 16px;
+      border:var(--px) solid var(--line); background:var(--panel); box-shadow:0 var(--px) 0 #0006; }
+    .brand { font-family:var(--pixel); font-size:15px; letter-spacing:1px; }
+    /* Per-letter rainbow wave, matching the boot splash / gate (discrete palette steps). */
+    .brand .c { display:inline-block; animation:rainbow 1.2s steps(1) infinite; }
+    .brand .c:nth-child(1){animation-delay:0s} .brand .c:nth-child(2){animation-delay:-.13s}
+    .brand .c:nth-child(3){animation-delay:-.26s} .brand .c:nth-child(4){animation-delay:-.39s}
+    .brand .c:nth-child(5){animation-delay:-.52s} .brand .c:nth-child(6){animation-delay:-.65s}
+    .brand .c:nth-child(7){animation-delay:-.78s} .brand .c:nth-child(8){animation-delay:-.91s}
+    .brand .cur { color:var(--accent-2); animation:blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity:0; } }
+    @keyframes rainbow { 0%{color:#ff004d} 17%{color:#ffa300} 34%{color:#ffec27}
+      50%{color:#00e436} 67%{color:#29adff} 84%{color:#ff77a8} }
+    .sub { font-family:var(--pixel); color:var(--muted); font-size:8px; text-transform:uppercase; }
+    .slot { margin-left:auto; display:inline-flex; align-items:center; gap:12px; }
+    .btn { font-family:var(--pixel); font-size:10px; text-transform:uppercase; color:var(--bg-0);
+      background:var(--accent-2); border:0; padding:10px 14px; cursor:pointer;
+      box-shadow:0 var(--px) 0 #065ab5; letter-spacing:1px; }
+    .btn:hover { filter:brightness(1.1); }
+    .btn:active { transform:translateY(var(--px)); box-shadow:none; }
+    /* The screen lives inside a pixel-art game cartridge: chamfered top-right corner, grip
+       ridges, a plastic body, and a label strip under the window. */
+    .stage { position:relative; display:flex; align-items:center; justify-content:center;
+      min-height:0; padding:10px;
+      background:
+        linear-gradient(90deg, #ffffff08 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(180deg, #ffffff08 1px, transparent 1px) 0 0 / 24px 24px, #05050b; }
+    .cart { position:relative; display:flex; flex-direction:column; gap:12px;
+      max-width:100%; max-height:100%; padding:22px 24px 18px; background:var(--cart);
+      clip-path:polygon(0 0, calc(100% - 34px) 0, 100% 34px, 100% 100%, 0 100%);
+      box-shadow:inset 3px 3px 0 #ffffff2e, inset -4px -5px 0 #00000055, inset 0 0 0 3px #00000040, 0 6px 0 #0006; }
+    .ridges { position:absolute; top:9px; left:24px; width:120px; height:15px;
+      background:repeating-linear-gradient(90deg, #00000045 0 4px, transparent 4px 10px); }
+    .screen { position:relative; display:flex; align-items:center; justify-content:center;
+      min-height:0; max-height:100%; padding:12px; background:#05050b;
+      box-shadow:inset 0 0 0 3px #000, inset 4px 4px 0 #ffffff12; }
+    #canvas { display:block; outline:none; background:#000; image-rendering:pixelated;
+      max-width:100%; max-height:100%; }
+    .cart-label { align-self:center; font-family:var(--pixel); padding:7px 18px; background:#fff1e8;
+      color:#1d2b53; letter-spacing:1px; font-size:11px;
+      box-shadow:inset -3px -3px 0 #0000001f, inset 3px 3px 0 #ffffffcc; }
+    .cart-label b { color:var(--accent); }
+    .stage.drag .cart { filter:brightness(1.12); }
+    .stage.drag .screen::after { content:"DROP CARTRIDGE"; position:absolute; inset:6px;
+      display:flex; align-items:center; justify-content:center; color:var(--accent-2);
+      border:var(--px) dashed var(--accent-2); background:#000000cc;
+      font-family:var(--pixel); font-size:11px; letter-spacing:1px; }
+    .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+      justify-content:center; gap:16px; background:#000000f2; color:var(--muted);
+      font-family:var(--pixel); font-size:9px; text-transform:uppercase; transition:opacity .35s ease; }
+    .overlay.hidden { opacity:0; pointer-events:none; }
+    .spinner { width:24px; height:24px; background:var(--accent);
+      animation:sp 1s steps(8) infinite; clip-path:polygon(0 0,100% 0,100% 100%,0 100%); }
+    @keyframes sp { to { transform:rotate(360deg); } }
+    .console { display:flex; flex-direction:column; border:var(--px) solid var(--line);
+      background:var(--panel); overflow:hidden; height:150px; transition:height .15s ease; }
+    .console.collapsed { height:34px; }
+    .console-head { display:flex; align-items:center; gap:12px; padding:9px 14px; font-family:var(--pixel);
+      font-size:9px; color:var(--muted); cursor:pointer; user-select:none; text-transform:uppercase; }
+    .console-head .label { color:var(--accent-2); }
+    .console-head .preview { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #log { margin:0; padding:6px 14px 10px; overflow:auto; font-family:var(--term); font-size:17px;
+      line-height:1.2; white-space:pre-wrap; word-break:break-word; border-top:var(--px) solid var(--line); }
+    .console.collapsed #log { display:none; }
+    #log .e { color:var(--err); } #log .w { color:var(--warn); } #log .ok { color:var(--accent-2); }
+    .hint { color:var(--muted); opacity:.75; font-size:15px; }
+    .hint code { color:var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <header class="topbar">
+      <span class="brand"><span class="c">L</span><span class="c">A</span><span class="c">Z</span><span class="c">Y</span><span class="c">-</span><span class="c">1</span><span class="c">0</span><span class="c">0</span><span class="cur">_</span></span>
+      <span class="sub">fantasy console</span>
+      <span class="slot">
+        <span class="hint">insert <code>.png</code>/<code>.lz100</code></span>
+        <button class="btn" id="pick" type="button">▸ Insert cartridge</button>
+        <input id="file" type="file" accept=".png,.lz100,.lua" multiple hidden>
+      </span>
+    </header>
+    <section class="stage" id="stage">
+      <div class="cart">
+        <div class="ridges"></div>
+        <div class="screen">
+          <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()" width="960" height="720"></canvas>
+          <div class="overlay" id="overlay"><div class="spinner"></div><div id="status">Loading…</div></div>
+        </div>
+        <div class="cart-label"><b>LAZY</b>-100</div>
+      </div>
+    </section>
+    <section class="console collapsed" id="console">
+      <div class="console-head" id="console-head">
+        <span class="label">console</span>
+        <span class="preview" id="preview">standby…</span>
+        <span>▴</span>
+      </div>
+      <pre id="log"></pre>
+    </section>
+  </div>
+  <script>
+    (function () {
+      /* NOTE: emscripten minifies this shell onto one line, so use ONLY block comments here. */
+      var canvas = document.getElementById("canvas");
+      var overlay = document.getElementById("overlay");
+      var statusEl = document.getElementById("status");
+      var logEl = document.getElementById("log");
+      var preview = document.getElementById("preview");
+      var consoleEl = document.getElementById("console");
+      var stage = document.getElementById("stage");
+      var firstLog = true, MAX = 800, lines = 0, ready = false;
+
+      document.getElementById("console-head").addEventListener("click", function () {
+        consoleEl.classList.toggle("collapsed");
+      });
+
+      function append(text, cls) {
+        if (text == null) return;
+        var msg = String(text);
+        if (firstLog) { consoleEl.classList.remove("collapsed"); firstLog = false; }
+        preview.textContent = msg;
+        var div = document.createElement("div");
+        div.className = cls || "l"; div.textContent = msg;
+        logEl.appendChild(div);
+        if (++lines > MAX && logEl.firstChild) { logEl.removeChild(logEl.firstChild); lines--; }
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      /* Write a picked/dropped cartridge into MEMFS at /carts/<name> so the console's
+         `ls` / `load` see it. Emscripten's FS is exported (see -sEXPORTED_RUNTIME_METHODS). */
+      function fs() { return (typeof FS !== "undefined") ? FS : (window.Module && Module.FS); }
+      function importCart(file) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          var f = fs();
+          if (!f) { append("filesystem not ready yet — try again in a moment", "w"); return; }
+          try { f.mkdir("/carts"); } catch (e) {}
+          try {
+            f.writeFile("/carts/" + file.name, new Uint8Array(reader.result));
+            f.syncfs(false, function () {}); /* persist the upload to IndexedDB */
+            var stem = file.name.replace(/\.[^.]+$/, "");
+            append("inserted carts/" + file.name, "ok");
+            append("  → type  load " + stem + "  then  run", "l");
+          } catch (e) { append("import failed: " + e, "e"); }
+        };
+        reader.readAsArrayBuffer(file);
+      }
+      function importFiles(list) {
+        if (!ready) { append("still booting — cartridge will load once ready", "w"); }
+        for (var i = 0; i < list.length; i++) importCart(list[i]);
+        canvas.focus();
+      }
+
+      document.getElementById("pick").addEventListener("click", function () {
+        document.getElementById("file").click();
+      });
+      document.getElementById("file").addEventListener("change", function (e) {
+        if (e.target.files && e.target.files.length) importFiles(e.target.files);
+        e.target.value = "";
+      });
+      /* Drag-and-drop straight onto the screen. */
+      ["dragenter", "dragover"].forEach(function (t) {
+        stage.addEventListener(t, function (e) { e.preventDefault(); stage.classList.add("drag"); });
+      });
+      ["dragleave", "drop"].forEach(function (t) {
+        stage.addEventListener(t, function (e) { e.preventDefault(); stage.classList.remove("drag"); });
+      });
+      stage.addEventListener("drop", function (e) {
+        if (e.dataTransfer && e.dataTransfer.files.length) importFiles(e.dataTransfer.files);
+      });
+      /* Keep the canvas focused so keyboard input reaches the console. */
+      stage.addEventListener("click", function () { canvas.focus(); });
+
+      var Module = window.Module || {};
+      Module.canvas = canvas;
+      Module.print = function (t) { append(t, "l"); };
+      Module.printErr = function (t) { append(t, /error|fail|abort/i.test(String(t)) ? "e" : "w"); };
+      Module.setStatus = function (t) { if (statusEl) statusEl.textContent = t || "Running"; };
+      /* Persistent storage: /carts and /saves live on IDBFS (IndexedDB), so downloaded or
+         uploaded carts, save data, and favorites survive reloads. Loading is gated as a run
+         dependency so main() only starts once the previous session's files are back. */
+      Module.preRun = Module.preRun || [];
+      Module.preRun.push(function () {
+        /* Everything in here is best-effort: a storage failure must degrade to
+           session-only, never block boot. */
+        try {
+          var f = (typeof FS !== "undefined") ? FS : Module.FS;
+          try { f.mkdir("/carts"); } catch (e) {}
+          try { f.mkdir("/saves"); } catch (e) {}
+          var idbfs = f.filesystems && f.filesystems.IDBFS;
+          var addDep = Module.addRunDependency, remDep = Module.removeRunDependency;
+          if (!idbfs || !addDep || !remDep) {
+            append("no IDBFS - storage is session-only", "w");
+            return;
+          }
+          f.mount(idbfs, {}, "/carts");
+          f.mount(idbfs, {}, "/saves");
+          addDep("lz-idbfs");
+          f.syncfs(true, function (err) {
+            if (err) append("storage load failed: " + err, "w");
+            remDep("lz-idbfs");
+          });
+        } catch (e) { append("storage init failed: " + e, "w"); }
+      });
+      Module.onRuntimeInitialized = function () {
+        ready = true; overlay.classList.add("hidden"); canvas.focus();
+        append("ready — insert a cartridge, or type  help", "ok");
+      };
+      Module.onAbort = function (what) { append("ABORT: " + what, "e"); overlay.classList.remove("hidden"); statusEl.textContent = "aborted"; };
+      setTimeout(function () { overlay.classList.add("hidden"); }, 8000);
+      window.Module = Module;
+    })();
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

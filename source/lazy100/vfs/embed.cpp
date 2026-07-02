@@ -24,6 +24,33 @@ namespace lazy100::embed
     }
 } // namespace lazy100::embed
 
+#elif defined(__EMSCRIPTEN__)
+
+// wasm: there's no ELF/COFF data section to .incbin into, so the build bakes the font into
+// MEMFS at /lazy100_font.ttf (--embed-file, see examples/xmake.lua) and we read it back once
+// into a static buffer - mirroring the .rc/.S delivery on desktop.
+#include <fstream>
+#include <vector>
+
+namespace lazy100::embed
+{
+    std::pair<const std::byte*, std::size_t> builtin_font()
+    {
+        static const std::vector<std::byte> data = []
+        {
+            std::ifstream in("/lazy100_font.ttf", std::ios::binary | std::ios::ate);
+            if (!in)
+                return std::vector<std::byte> {};
+            const auto             size = static_cast<std::size_t>(in.tellg());
+            std::vector<std::byte> buf(size);
+            in.seekg(0);
+            in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(size));
+            return buf;
+        }();
+        return {data.data(), data.size()};
+    }
+} // namespace lazy100::embed
+
 #else
 
 extern "C" const std::byte lazy100_font_start[];
