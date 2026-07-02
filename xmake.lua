@@ -32,8 +32,6 @@ if is_plat("windows") then
     add_cxxflags("/bigobj") -- avoid big obj
     add_cxxflags("-D_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING")
     add_cxxflags("/EHsc")
-    -- Static CRT (MT/MTd) to match the VRI package and its ecosystem; VRI links statically,
-    -- so a dynamic CRT here fails with LNK2038 runtime-mismatch errors.
     set_runtimes(is_mode("debug") and "MTd" or "MT")
 else
     add_cxxflags("-fexceptions")
@@ -63,6 +61,9 @@ includes("external")
 
 -- include source
 includes("source")
+
+-- host tools (cartshot preview generator)
+includes("tools")
 
 -- include tests
 if has_config("lazy100_build_tests") then
