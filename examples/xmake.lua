@@ -17,13 +17,8 @@ target("lazy100")
         add_files("$(projectdir)/embed/lazy100.S")
     end
 
-    -- VRI's Vulkan backend calls the loader directly; the vri package compiles against
-    -- headers only, so link vulkan-1 from the system Vulkan SDK into the final executable.
-    if is_plat("windows") then
-        local vk = os.getenv("VULKAN_SDK")
-        if vk then
-            add_linkdirs(path.join(vk, "Lib"))
-            add_links("vulkan-1")
-        end
-    end
+    -- GL-only build: no Vulkan loader is linked. (When the VRI Vulkan backend is enabled the
+    -- host must link vulkan-1 from the system SDK - but do it by the loader's full path, never
+    -- by adding $VULKAN_SDK/Lib as a search dir: that dir also ships MD-built spirv-cross libs
+    -- that would shadow our MT spirv-cross and break the link with LNK2038.)
 target_end()
