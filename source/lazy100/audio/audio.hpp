@@ -34,6 +34,11 @@ namespace lazy100
         // For UI playback indicators; updated from the audio thread. Thread-safe.
         int music_pattern() const;
 
+        // True while the post-start warm-up dither is still running (waking a power-saving
+        // speaker). The boot splash holds a black, silent screen until this clears so the
+        // chime isn't lost. False if audio is disabled. Thread-safe.
+        bool warming_up() const;
+
     private:
         struct Impl;
         std::unique_ptr<Impl> p_;

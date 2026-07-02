@@ -8,9 +8,15 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
 
+#if defined(__EMSCRIPTEN__)
+#    include <emscripten/html5.h>
+#endif
+
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <thread>
 
 namespace lazy100
 {
@@ -71,6 +77,23 @@ namespace lazy100
         bool      started    = false;
         double    sampleRate = 44100.0;
 
+#if defined(__EMSCRIPTEN__)
+        // web: false until the first user gesture starts the device (resumes the AudioContext).
+        bool deviceRunning = false;
+
+        // Start the (suspended) device from within a DOM gesture event; the browser only resumes
+        // the AudioContext when this runs synchronously in a user-gesture stack. One-shot.
+        static EM_BOOL try_resume(Impl* im)
+        {
+            if (im && !im->deviceRunning && ma_device_start(&im->device) == MA_SUCCESS)
+                im->deviceRunning = true;
+            return EM_FALSE; // don't consume the event
+        }
+        static EM_BOOL on_key(int, const EmscriptenKeyboardEvent*, void* ud) { return try_resume(static_cast<Impl*>(ud)); }
+        static EM_BOOL on_mouse(int, const EmscriptenMouseEvent*, void* ud) { return try_resume(static_cast<Impl*>(ud)); }
+        static EM_BOOL on_touch(int, const EmscriptenTouchEvent*, void* ud) { return try_resume(static_cast<Impl*>(ud)); }
+#endif
+
         // ---- sfx: SPSC lock-free queue (producer = main/Lua thread) ----
         struct Msg
         {
@@ -95,6 +118,14 @@ namespace lazy100
         // keeps stepping underneath, so it resumes in sync the instant the sfx finishes.
         Channel  musicVoice[kChannels];
         Channel  sfxVoice[kChannels];
+
+        // ---- speaker warm-up ----
+        // A power-saving output (notably a Bluetooth speaker) sleeps when the stream is idle and
+        // takes ~1s to wake, swallowing the start of the first sound. Right after the device
+        // starts we emit a sub-audible dither for a moment so the speaker powers up before the
+        // real audio (the boot chime) arrives. Counted down on the audio thread.
+        std::atomic<uint32_t> warmupFrames {0};
+        uint32_t              warmupNoise = 0x9E3779B9u;
         bool     musicOn    = false;
         int      musicCur        = 0;
         int      musicStart      = 0;     // pattern music() started on
@@ -276,6 +307,8 @@ namespace lazy100
             // advance) while sfx keep playing.
             const bool paused = musicPauseFlag.load(std::memory_order_relaxed);
 
+            uint32_t warm = warmupFrames.load(std::memory_order_relaxed);
+
             for (ma_uint32 f = 0; f < frames; ++f)
             {
                 if (musicLoad && !paused)
@@ -298,6 +331,17 @@ namespace lazy100
                 if (!paused)
                     advance_music_if_idle();
 
+                if (warm > 0)
+                {
+                    // Sub-audible dither (~-52 dB) to keep a power-saving speaker awake until the
+                    // real audio arrives. Quiet enough to be inaudible on a wired output.
+                    warmupNoise ^= warmupNoise << 13;
+                    warmupNoise ^= warmupNoise >> 17;
+                    warmupNoise ^= warmupNoise << 5;
+                    s += ((static_cast<double>(warmupNoise) / 2147483647.5) - 1.0) * 0.0025;
+                    --warm;
+                }
+
                 if (s > 1.0)
                     s = 1.0;
                 if (s < -1.0)
@@ -305,6 +349,8 @@ namespace lazy100
                 o[f * 2 + 0] = static_cast<float>(s);
                 o[f * 2 + 1] = static_cast<float>(s);
             }
+
+            warmupFrames.store(warm, std::memory_order_relaxed);
 
             // Publish the playback position for the music editor's live indicator.
             musicPos.store(musicOn ? musicCur : -1, std::memory_order_relaxed);
@@ -325,23 +371,58 @@ namespace lazy100
         cfg.sampleRate        = 44100;
         cfg.dataCallback      = &Impl::render;
         cfg.pUserData         = &im;
+
+#if defined(__EMSCRIPTEN__)
+        // The browser keeps the AudioContext suspended until a user gesture, so the device is
+        // only *started* from inside the first key/mouse/touch event (which runs synchronously in
+        // the DOM gesture stack and resumes the context - see libvultra's AudioSystem). Starting
+        // here at init would create a permanently-suspended context that never produces sound.
+        // Until the gesture, sfx/music just queue and the render callback simply doesn't run yet.
         if (ma_device_init(nullptr, &cfg, &im.device) != MA_SUCCESS)
         {
             LZ_WARN("audio: device init failed; sound disabled");
             p_.reset();
             return false;
         }
+        im.started    = true; // device is live (shutdown must uninit it), even before it runs
         im.sampleRate = im.device.sampleRate;
-        if (ma_device_start(&im.device) != MA_SUCCESS)
-        {
-            LZ_WARN("audio: device start failed; sound disabled");
-            ma_device_uninit(&im.device);
-            p_.reset();
-            return false;
-        }
-        im.started = true;
-        LZ_INFO("audio: started (%u Hz)", static_cast<unsigned>(im.sampleRate));
+        im.warmupFrames.store(static_cast<uint32_t>(im.sampleRate * 1.5), std::memory_order_relaxed);
+        emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, &im, EM_TRUE, &Impl::on_key);
+        emscripten_set_mousedown_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, &im, EM_TRUE, &Impl::on_mouse);
+        emscripten_set_touchstart_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, &im, EM_TRUE, &Impl::on_touch);
+        LZ_INFO("audio: ready (%u Hz; resumes on first gesture)", static_cast<unsigned>(im.sampleRate));
         return true;
+#else
+        // Right after process start the OS audio backend can briefly be unavailable (device
+        // enumeration still settling), so a single attempt sometimes loses sound on a cold boot.
+        // Retry a few times with a short backoff before giving up.
+        constexpr int kMaxAttempts = 10;
+        for (int attempt = 1; attempt <= kMaxAttempts; ++attempt)
+        {
+            if (ma_device_init(nullptr, &cfg, &im.device) != MA_SUCCESS)
+                LZ_WARN("audio: device init failed (attempt %d/%d)", attempt, kMaxAttempts);
+            else if (ma_device_start(&im.device) != MA_SUCCESS)
+            {
+                LZ_WARN("audio: device start failed (attempt %d/%d)", attempt, kMaxAttempts);
+                ma_device_uninit(&im.device);
+            }
+            else
+            {
+                im.started    = true;
+                im.sampleRate = im.device.sampleRate;
+                // ~1.5s of sub-audible dither so a sleeping speaker wakes before the boot chime.
+                im.warmupFrames.store(static_cast<uint32_t>(im.sampleRate * 1.5),
+                                      std::memory_order_relaxed);
+                LZ_INFO("audio: started (%u Hz)", static_cast<unsigned>(im.sampleRate));
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        LZ_WARN("audio: no device after %d attempts; sound disabled", kMaxAttempts);
+        p_.reset();
+        return false;
+#endif
     }
 
     void Audio::shutdown()
@@ -395,4 +476,9 @@ namespace lazy100
     }
 
     int Audio::music_pattern() const { return p_ ? p_->musicPos.load(std::memory_order_relaxed) : -1; }
+
+    bool Audio::warming_up() const
+    {
+        return p_ && p_->warmupFrames.load(std::memory_order_relaxed) > 0;
+    }
 } // namespace lazy100
