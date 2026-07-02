@@ -28,6 +28,13 @@ namespace lazy100
                 tiles_[static_cast<u32>(y) * kW + static_cast<u32>(x)] = v;
         }
         void clear() { tiles_.fill(kEmpty); }
+        bool blank() const // no cell has been placed
+        {
+            for (const u8 t : tiles_)
+                if (t != kEmpty)
+                    return false;
+            return true;
+        }
 
         u8*       tiles() { return tiles_.data(); }
         const u8* tiles() const { return tiles_.data(); }

@@ -66,5 +66,22 @@ namespace lazy100
             for (auto& m : music)
                 m = MusicPattern {};
         }
+
+        bool blank() const // no audible note and no music row authored
+        {
+            for (const SfxPattern& p : sfx)
+                for (const SfxNote& n : p.notes)
+                    if (n.vol > 0)
+                        return false;
+            for (const MusicPattern& m : music)
+            {
+                if (m.flags != 0)
+                    return false;
+                for (const u8 c : m.sfx)
+                    if (c != 255)
+                        return false;
+            }
+            return true;
+        }
     };
 } // namespace lazy100

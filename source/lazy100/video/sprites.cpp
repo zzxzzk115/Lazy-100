@@ -21,6 +21,17 @@ namespace lazy100
         flags_.fill(0);
     }
 
+    bool SpriteSheet::blank() const
+    {
+        for (const u8 p : px_)
+            if (p != 0)
+                return false;
+        for (const u8 f : flags_)
+            if (f != 0)
+                return false;
+        return true;
+    }
+
     u8 SpriteSheet::flags(int n) const { return (n >= 0 && n < kSpriteCount) ? flags_[n] : 0; }
     void SpriteSheet::set_flags(int n, u8 f)
     {

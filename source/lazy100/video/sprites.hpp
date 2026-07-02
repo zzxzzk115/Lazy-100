@@ -31,6 +31,7 @@ namespace lazy100
         u8*       pixels() { return px_.data(); }
         const u8* pixels() const { return px_.data(); }
         void      clear(); // zero pixels + flags (blank sheet)
+        bool      blank() const; // true if no pixel or flag has been touched
 
         // Draw sprite n (a w*h block of 16px sprites) at (x,y), with optional flips.
         void spr(Framebuffer& fb, int n, int x, int y, int w, int h, bool fx, bool fy, const u8* draw_pal,

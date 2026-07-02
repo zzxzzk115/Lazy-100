@@ -233,4 +233,14 @@ namespace lazy100::cartpng
             LZ_ERROR("cartpng: %s is not a lazy-100 cart PNG", path.c_str());
         return ok;
     }
+
+    bool write_rgba(const std::string& path, int w, int h, const unsigned char* rgba)
+    {
+        if (!stbi_write_png(path.c_str(), w, h, 4, rgba, w * 4))
+        {
+            LZ_ERROR("cartpng: cannot write %s", path.c_str());
+            return false;
+        }
+        return true;
+    }
 } // namespace lazy100::cartpng

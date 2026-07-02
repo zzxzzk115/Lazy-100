@@ -11,7 +11,7 @@ namespace lazy100
 
     // A shareable "cartridge PNG": the image shows the sprite sheet as a label, and the whole
     // serialized .lz100 cart (RLE-compressed) is hidden in the low 2 bits of the RGBA pixels
-    // (PICO-8 style). Lossless as long as it stays a PNG.
+    // (classic fantasy-console trick). Lossless as long as it stays a PNG.
     namespace cartpng
     {
         // Encode `cartText` (from cart::serialize) into a cart PNG at `path`. The visible picture
@@ -22,5 +22,8 @@ namespace lazy100
 
         // Recover the serialized cart text hidden in a cart PNG. False if it isn't one.
         bool load(const std::string& path, std::string& cartText);
+
+        // Write a plain RGBA8 image (no hidden payload) - used by tools (cartshot previews).
+        bool write_rgba(const std::string& path, int w, int h, const unsigned char* rgba);
     } // namespace cartpng
 } // namespace lazy100
