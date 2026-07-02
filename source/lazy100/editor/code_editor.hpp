@@ -18,6 +18,7 @@ namespace lazy100
         icon::Id     icon() const override { return icon::TabCode; }
         void         update(Console& con) override;
         void         draw(Console& con, Framebuffer& fb) override;
+        bool         on_escape(Console& con) override; // closes the cheatsheet overlay first
         cursor::Type cursor(Console& con) const override;
 
     private:
@@ -26,6 +27,7 @@ namespace lazy100
         std::string word_prefix() const;                // identifier chars just before the cursor
         void        refresh_completions();              // rebuild matches_ from the current prefix
         void        accept_completion();                // replace the prefix with the selected match
+        void        draw_manual(Framebuffer& fb, int statusY); // the book-icon cheatsheet overlay
 
         std::vector<std::string> lines_ {""};
         std::string              cache_;     // last code we synced, to detect external edits
@@ -38,5 +40,8 @@ namespace lazy100
 
         std::vector<const char*> matches_; // live autocomplete candidates for the current word
         int                      comp_sel_ = 0; // selected candidate in the popup
+
+        bool manual_open_   = false; // book-icon cheatsheet overlay (API signatures by category)
+        int  manual_scroll_ = 0;     // first visible cheatsheet row
     };
 } // namespace lazy100

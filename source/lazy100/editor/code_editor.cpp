@@ -5,6 +5,7 @@
 #include "lazy100/editor/ui.hpp"
 #include "lazy100/input/keyboard.hpp"
 #include "lazy100/input/mouse.hpp"
+#include "lazy100/script/api_doc.hpp"
 #include "lazy100/video/draw.hpp"
 #include "lazy100/video/font.hpp"
 #include "lazy100/video/framebuffer.hpp"
@@ -90,30 +91,95 @@ namespace lazy100
                                                               "repeat", "nil",  "true",  "false"};
             return t.count(w) != 0;
         }
-        // Lazy-100 API + math builtins + lifecycle callbacks.
+        // Lazy-100 API + lifecycle callbacks, sourced from the apidoc registry so autocomplete,
+        // syntax colors, hints, and the cheatsheet can never drift apart.
         const std::unordered_set<std::string>& builtins()
         {
-            static const std::unordered_set<std::string> b = {
-                "cls",  "pset",  "pget",  "line",   "rect", "rectfill", "circ", "circfill", "print", "spr",
-                "sspr", "sget",  "sset",  "fget",   "fset", "pal",      "palt", "btn",      "btnp",  "sfx",
-                "music","mget",  "mset",  "map",    "flr",  "ceil",     "abs",  "min",      "max",   "mid",
-                "sgn",  "sqrt",  "sin",   "cos",    "atan2","rnd",      "srand","t",        "time",  "_init",
-                "_update", "_update60", "_draw"};
+            static const std::unordered_set<std::string> b = []
+            {
+                std::unordered_set<std::string> s;
+                int                             nc   = 0;
+                const apidoc::Category*         cats = apidoc::categories(nc);
+                for (int c = 0; c < nc; ++c)
+                    for (int i = 0; i < cats[c].count; ++i)
+                        s.insert(cats[c].fns[i].name);
+                return s;
+            }();
             return b;
         }
-        // Flat, sorted vocabulary for autocomplete (keywords first, then builtins).
+        // Flat vocabulary for autocomplete (keywords first, then the API names, sorted).
         const std::vector<const char*>& vocabulary()
         {
-            static const std::vector<const char*> v = {
-                // keywords
-                "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
-                "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
-                // builtins / api
-                "abs", "atan2", "btn", "btnp", "ceil", "circ", "circfill", "cls", "cos", "fget", "flr", "fset",
-                "line", "map", "max", "mget", "mid", "min", "mset", "music", "pal", "palt", "pget", "print",
-                "pset", "rect", "rectfill", "rnd", "sfx", "sget", "sgn", "sin", "spr", "sqrt", "srand", "sset",
-                "sspr", "t", "time", "_draw", "_init", "_update", "_update60"};
+            static const std::vector<const char*> v = []
+            {
+                std::vector<const char*> out = {
+                    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if",
+                    "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"};
+                std::vector<const char*> api;
+                int                      nc   = 0;
+                const apidoc::Category*  cats = apidoc::categories(nc);
+                for (int c = 0; c < nc; ++c)
+                    for (int i = 0; i < cats[c].count; ++i)
+                        api.push_back(cats[c].fns[i].name);
+                std::sort(api.begin(), api.end(),
+                          [](const char* a, const char* b) { return std::strcmp(a, b) < 0; });
+                out.insert(out.end(), api.begin(), api.end());
+                return out;
+            }();
             return v;
+        }
+
+        // Innermost unclosed call around byte `pos` of `s` (strings and comments skipped):
+        // fills the called function's name and the 0-based argument index at the caret.
+        bool call_context(const std::string& s, int pos, std::string& name, int& arg)
+        {
+            struct Frame
+            {
+                std::string fn;
+                int         commas = 0;
+            };
+            std::vector<Frame> stack;
+            const auto ident_before = [&s](int end)
+            {
+                int a = end;
+                while (a > 0 &&
+                       (std::isalnum(static_cast<unsigned char>(s[a - 1])) || s[a - 1] == '_'))
+                    --a;
+                return s.substr(a, end - a);
+            };
+            for (int i = 0; i < pos;)
+            {
+                const char c = s[i];
+                if (c == '-' && i + 1 < pos && s[i + 1] == '-')
+                    break; // comment: the caret can't be in a call after this
+                if (c == '"' || c == '\'')
+                {
+                    int j = i + 1;
+                    while (j < pos && s[j] != c)
+                        j += (s[j] == '\\' && j + 1 < pos) ? 2 : 1;
+                    i = (j < pos) ? j + 1 : pos;
+                    continue;
+                }
+                if (c == '(')
+                    stack.push_back({ident_before(i), 0});
+                else if (c == ')')
+                {
+                    if (!stack.empty())
+                        stack.pop_back();
+                }
+                else if (c == ',' && !stack.empty())
+                    ++stack.back().commas;
+                ++i;
+            }
+            // Grouping parens have no name; the hint belongs to the nearest *named* call.
+            for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+                if (!it->fn.empty())
+                {
+                    name = it->fn;
+                    arg  = it->commas;
+                    return true;
+                }
+            return false;
         }
 
         u8 word_color(const std::string& w)
@@ -224,12 +290,57 @@ namespace lazy100
         code = out;
     }
 
+    bool CodeEditor::on_escape(Console&)
+    {
+        if (manual_open_)
+        {
+            manual_open_ = false;
+            return true; // consumed: close the cheatsheet instead of opening the pause menu
+        }
+        return false;
+    }
+
+    // Total row count of the flattened cheatsheet (headers + signatures + briefs + spacers).
+    static int manual_row_count()
+    {
+        static const int n = []
+        {
+            int                     rows = 0;
+            int                     nc   = 0;
+            const apidoc::Category* cats = apidoc::categories(nc);
+            for (int c = 0; c < nc; ++c)
+                rows += 1 + cats[c].count * 2 + 1; // header + (sig + brief) each + spacer
+            return rows;
+        }();
+        return n;
+    }
+
     void CodeEditor::update(Console& con)
     {
         sync_from(con.code());
         const Keyboard& kb  = con.keyboard();
         const Mouse&    m   = con.mouse();
         const int       cx0 = cx_, cy0 = cy_; // remember caret, to detect motion for scroll-follow
+
+        // ---- cheatsheet overlay: swallow all input except scrolling while open ----
+        if (manual_open_)
+        {
+            const int lh      = font::line_height();
+            const int statusY = static_cast<int>(kScreenH) - lh - 1;
+            const int visible = std::max(1, (statusY - kTop - lh - 2) / lh); // minus the title row
+            if (const int w = m.wheel())
+                manual_scroll_ -= w * 3;
+            if (kb.repeat(Keyboard::Up))
+                --manual_scroll_;
+            if (kb.repeat(Keyboard::Down))
+                ++manual_scroll_;
+            if (kb.repeat(Keyboard::PageUp))
+                manual_scroll_ -= visible;
+            if (kb.repeat(Keyboard::PageDown))
+                manual_scroll_ += visible;
+            manual_scroll_ = std::clamp(manual_scroll_, 0, std::max(0, manual_row_count() - visible));
+            return;
+        }
 
         // ---- mouse: wheel scrolls the view; left-click places the caret ----
         const int lh      = font::line_height();
@@ -484,7 +595,7 @@ namespace lazy100
         // Status line.
         draw::line(fb, 0, statusY - 1, static_cast<int>(kScreenW) - 1, statusY - 1, ui::kBorder);
         char st[72];
-        std::snprintf(st, sizeof(st), "ln %d  col %d   Tab: complete   ESC: shell", cy_ + 1, cx_ + 1);
+        std::snprintf(st, sizeof(st), "ln %d  col %d   Tab: complete   ESC: menu", cy_ + 1, cx_ + 1);
         font::print(fb, st, 2, statusY, ui::kDim);
 
         // Autocomplete popup, anchored under the caret.
@@ -511,6 +622,59 @@ namespace lazy100
             }
         }
 
+        // Parameter hint: the signature of the call the caret sits in, active argument
+        // highlighted. Anchored just above the caret line (below it on the top row).
+        if (!manual_open_)
+        {
+            std::string fname;
+            int         argi = 0;
+            if (call_context(lines_[cy_], cx_, fname, argi))
+                if (const apidoc::Fn* fn = apidoc::find(fname))
+                {
+                    const std::string sig(fn->sig);
+                    const size_t      open  = sig.find('(');
+                    const std::string head  = sig.substr(0, open + 1);      // "spr("
+                    const std::string inner = sig.substr(open + 1, sig.size() - open - 2);
+                    std::vector<std::string> params;
+                    for (size_t a = 0; a <= inner.size();)
+                    {
+                        size_t b = inner.find(',', a);
+                        if (b == std::string::npos)
+                            b = inner.size();
+                        std::string p = inner.substr(a, b - a);
+                        while (!p.empty() && p.front() == ' ')
+                            p.erase(p.begin());
+                        if (!p.empty())
+                            params.push_back(p);
+                        a = b + 1;
+                    }
+                    const int hw = font::text_width(sig.c_str()) + 8;
+                    const int hh = lh + 2;
+                    int       hx = std::min(caretX, static_cast<int>(kScreenW) - hw);
+                    int       hy = caretY - hh - 1;
+                    if (hy < kTop)
+                        hy = caretY + lh + 1;
+                    hx = std::max(0, hx);
+                    ui::panel(fb, hx, hy, hw, hh, ui::kPanel, ui::kBorderHi);
+                    int tx = font::print(fb, head.c_str(), hx + 4, hy + 1, 12);
+                    for (size_t i = 0; i < params.size(); ++i)
+                    {
+                        if (i)
+                            tx = font::print(fb, ", ", tx, hy + 1, ui::kDim);
+                        tx = font::print(fb, params[i].c_str(), tx, hy + 1,
+                                         static_cast<int>(i) == argi ? 10 : ui::kDim);
+                    }
+                    font::print(fb, ")", tx, hy + 1, 12);
+                }
+        }
+
+        if (manual_open_)
+            draw_manual(fb, statusY);
+
+        // Book: toggle the API cheatsheet; '?': the usual controls tooltip.
+        if (ui::icon_button(fb, con.mouse(), static_cast<int>(kScreenW) - 29, statusY - 1, 12, 12,
+                            icon::Book, manual_open_))
+            manual_open_ = !manual_open_;
         ui::help_button(fb, con, con.mouse(), static_cast<int>(kScreenW) - 15, statusY - 1, 5,
                         "CODE\n"
                         "type to edit; Tab: autocomplete\n"
@@ -518,7 +682,59 @@ namespace lazy100
                         "up/down while list open: pick\n"
                         "arrows / home / end / pgup-dn\n"
                         "ctrl+tab: switch editor\n"
-                        "ESC: shell (then run / save)");
+                        "book: API cheatsheet; ESC: menu");
+    }
+
+    void CodeEditor::draw_manual(Framebuffer& fb, int statusY)
+    {
+        const int W  = static_cast<int>(kScreenW);
+        const int lh = font::line_height();
+
+        fb.rectfill(0, EditorHost::kTabH, W - 1, statusY - 2, ui::kBg);
+
+        // title bar
+        fb.rectfill(0, EditorHost::kTabH, W - 1, EditorHost::kTabH + lh + 1, ui::kPanel);
+        font::print(fb, "API CHEATSHEET", 4, EditorHost::kTabH + 1, ui::kText);
+        const char* tip = "wheel/arrows scroll   esc/book close";
+        font::print(fb, tip, W - 4 - font::text_width(tip), EditorHost::kTabH + 1, ui::kDim);
+
+        const int top = EditorHost::kTabH + lh + 3;
+        int       row = 0, y = top;
+        int       nc = 0;
+        const apidoc::Category* cats = apidoc::categories(nc);
+        const auto              emit = [&](const auto& drawFn)
+        {
+            if (row >= manual_scroll_ && y < statusY - 2)
+            {
+                drawFn(y);
+                y += lh;
+            }
+            ++row;
+        };
+        for (int c = 0; c < nc; ++c)
+        {
+            const apidoc::Category& cat = cats[c];
+            emit([&](int yy)
+                 {
+                     font::print(fb, cat.name, 4, yy, ui::kHeader);
+                     const int nw = font::text_width(cat.name);
+                     draw::line(fb, 4 + nw + 5, yy + lh / 2, W - 5, yy + lh / 2, ui::kBorder);
+                 });
+            for (int i = 0; i < cat.count; ++i)
+            {
+                const apidoc::Fn& fn = cat.fns[i];
+                emit([&](int yy)
+                     {
+                         // name in blue, the parameter list in plain text
+                         const std::string sig(fn.sig);
+                         const size_t      open = sig.find('(');
+                         const int x = font::print(fb, sig.substr(0, open).c_str(), 8, yy, 12);
+                         font::print(fb, sig.substr(open).c_str(), x, yy, ui::kText);
+                     });
+                emit([&](int yy) { font::print(fb, fn.brief, 16, yy, ui::kDim); });
+            }
+            emit([](int) {}); // spacer
+        }
     }
 
     cursor::Type CodeEditor::cursor(Console& con) const

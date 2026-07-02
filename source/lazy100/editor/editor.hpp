@@ -21,6 +21,9 @@ namespace lazy100
         virtual icon::Id    icon() const                 = 0; // tab-bar glyph
         virtual void        update(Console&)             {}
         virtual void        draw(Console&, Framebuffer&) = 0;
+        // First crack at ESC (e.g. closing an overlay like the code editor's cheatsheet).
+        // Return true to consume it; false lets the console open its pause menu.
+        virtual bool on_escape(Console&) { return false; }
         // Desired pixel cursor for the current mouse position (default: pointer).
         virtual cursor::Type cursor(Console&) const { return cursor::Arrow; }
     };
@@ -41,6 +44,9 @@ namespace lazy100
         int  count() const { return static_cast<int>(editors_.size()); }
 
         cursor::Type cursor(Console& con) const { return editors_[current_]->cursor(con); }
+
+        // Offer ESC to the active editor first (overlays close themselves before the pause menu).
+        bool on_escape(Console& con) { return editors_[static_cast<size_t>(current_)]->on_escape(con); }
 
     private:
         std::vector<std::unique_ptr<Editor>> editors_;

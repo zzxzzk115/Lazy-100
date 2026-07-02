@@ -34,6 +34,7 @@ namespace lazy100
             WaveSaw,
             WaveNoise,
             Help, // '?' hint button
+            Book, // manual / cheatsheet button
             Count
         };
 

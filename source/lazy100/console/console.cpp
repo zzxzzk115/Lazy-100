@@ -500,7 +500,8 @@ namespace lazy100
                 run_acc_ = 0.0;
                 // ESC opens the editor's popup menu (same component as the browser/cart menus);
                 // while it is open the editors are frozen so menu keys can't leak into them.
-                if (keyboard_.pressed(Keyboard::Escape))
+                // The active editor gets first crack (e.g. the code editor closes its cheatsheet).
+                if (keyboard_.pressed(Keyboard::Escape) && !editor_host_.on_escape(*this))
                 {
                     if (pause_menu_.is_open())
                         pause_menu_.close();
