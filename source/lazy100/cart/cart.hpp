@@ -10,7 +10,7 @@ namespace lazy100
     class Map;
     struct SoundBank;
 
-    // The .lz100 cart format: a PICO-8-style single text file with sections.
+    // The .lz100 cart format: a single plain-text file with sections (classic fantasy-console style).
     //   lazy-100 cartridge / version 1
     //   __lua__   <source>
     //   __gfx__   256 rows of 512 hex chars (256 px * 2 hex; palette index 00..ff)

@@ -26,7 +26,7 @@ scripting in **Lua 5.4**. It stands on the shoulders of
 
 ## Build
 
-Requires [xmake](https://xmake.io) and, on Windows, the Vulkan SDK (for the loader).
+Requires [xmake](https://xmake.io).
 
 ```sh
 xmake            # configure + build

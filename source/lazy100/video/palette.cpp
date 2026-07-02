@@ -4,7 +4,7 @@ namespace lazy100
 {
     namespace
     {
-        // The first 32 entries are curated for pixel art: the 16 PICO-8 colors followed by its
+        // The first 32 entries are curated for pixel art: a classic 16-color set followed by its
         // 16 "secret" extended colors. Readable and battle-tested.
         constexpr Color32 kCurated[32] = {
             {0, 0, 0, 255},       {29, 43, 83, 255},    {126, 37, 83, 255},   {0, 135, 81, 255},

@@ -15,7 +15,7 @@ namespace lazy100
         void shutdown();
 
         // Draw UTF-8 `text` top-left at (x,y) in color c; handles '\n'. Returns the x just
-        // past the last glyph (PICO-8 print's return value).
+        // past the last glyph (print()'s return value).
         int print(Framebuffer& fb, const char* text, int x, int y, u8 c);
 
         // Advance width of `text` in pixels (no drawing) — for carets, columns, popups.

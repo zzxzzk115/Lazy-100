@@ -9,7 +9,7 @@ namespace lazy100
     {
         constexpr u32 bit(int b) { return 1u << b; }
 
-        // PICO-8-style auto-repeat: after the initial press, wait 15 steps, then fire every 4.
+        // Classic auto-repeat: after the initial press, wait 15 steps, then fire every 4.
         constexpr int kRepeatDelay  = 15;
         constexpr int kRepeatPeriod = 4;
     } // namespace
