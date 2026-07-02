@@ -14,5 +14,7 @@ namespace lazy100
         void rect(Framebuffer& fb, int x0, int y0, int x1, int y1, u8 c);     // outline
         void circ(Framebuffer& fb, int cx, int cy, int r, u8 c);             // outline
         void circfill(Framebuffer& fb, int cx, int cy, int r, u8 c);         // filled
+        void oval(Framebuffer& fb, int x0, int y0, int x1, int y1, u8 c);     // ellipse in a bounding box
+        void ovalfill(Framebuffer& fb, int x0, int y0, int x1, int y1, u8 c); // filled ellipse
     } // namespace draw
 } // namespace lazy100
