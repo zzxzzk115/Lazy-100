@@ -1,5 +1,7 @@
 #include "lazy100/video/font.hpp"
 
+#include "lazy100/video/tic_font.h"
+
 #include "lazy100/common/log.hpp"
 #include "lazy100/vfs/vfs.hpp"
 #include "lazy100/video/framebuffer.hpp"
@@ -16,7 +18,7 @@ namespace lazy100::font
 {
     namespace
     {
-        constexpr int kPixel = 10; // Fusion Pixel native size
+        constexpr int kPixel = 8; // Fusion Pixel native size
 
         struct Glyph
         {
@@ -104,7 +106,7 @@ namespace lazy100::font
     bool init()
     {
         // Built-in font, linked into the binary and read from the in-memory VFS.
-        constexpr const char* kPath = "fonts/fusion-pixel-10px-monospaced-zh_hans.ttf";
+        constexpr const char* kPath = "fonts/fusion-pixel-8px-monospaced-zh_hans.ttf";
         auto                  bytes = vfs::read_builtin(kPath);
         if (!bytes || bytes->empty())
         {
@@ -125,9 +127,9 @@ namespace lazy100::font
         int ascent = 0, descent = 0, linegap = 0;
         stbtt_GetFontVMetrics(&g_info, &ascent, &descent, &linegap);
         g_ascentPx = static_cast<int>(std::lround(ascent * g_scale));
-        g_lineH    = static_cast<int>(std::lround((ascent - descent + linegap) * g_scale));
-        if (g_lineH < kPixel)
-            g_lineH = kPixel + 2;
+        // Fixed line height: the TTF's own metrics pad generously (the 8px face reports 12),
+        // but a pixel-grid console wants tight, predictable rows.
+        g_lineH = kPixel + 2;
         g_ready = true;
         LZ_INFO("font: loaded built-in TTF (%zu bytes), lineH=%d", g_ttf.size(), g_lineH);
         return true;
@@ -142,6 +144,38 @@ namespace lazy100::font
 
     int line_height() { return g_lineH; }
 
+
+    namespace
+    {
+        // Built-in text icons: bytes \1..\15 (skipping \t \n \r) inside any printed string
+        // render as 8x8 pictographs - button prompts and small marks carts can use in text,
+        // e.g. print("press \6 to jump"). Bit 7 of each row byte is the leftmost pixel.
+        struct TextIcon { unsigned char rows[8]; };
+        constexpr TextIcon kTextIcons[16] = {
+            {{0}},                                                        // 0 (unused)
+            {{0x10, 0x30, 0x7E, 0xFE, 0x7E, 0x30, 0x10, 0x00}},           // \1 left
+            {{0x08, 0x0C, 0x7E, 0x7F, 0x7E, 0x0C, 0x08, 0x00}},           // \2 right
+            {{0x10, 0x38, 0x7C, 0xFE, 0x38, 0x38, 0x38, 0x00}},           // \3 up
+            {{0x38, 0x38, 0x38, 0xFE, 0x7C, 0x38, 0x10, 0x00}},           // \4 down
+            {{0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C}},           // \5 o button
+            {{0xC3, 0xE7, 0x7E, 0x3C, 0x3C, 0x7E, 0xE7, 0xC3}},           // \6 x button
+            {{0x6C, 0xFE, 0xFE, 0xFE, 0x7C, 0x38, 0x10, 0x00}},           // \7 heart
+            {{0x10, 0x10, 0xFE, 0x7C, 0x38, 0x6C, 0x44, 0x00}},           // \8 star
+            {{0}}, {{0}},                                                 // \t \n (text controls)
+            {{0x06, 0x05, 0x04, 0x04, 0x3C, 0x7C, 0x38, 0x00}},           // \11 note
+            {{0x10, 0x38, 0x7C, 0xFE, 0x7C, 0x38, 0x10, 0x00}},           // \12 diamond
+            {{0}},                                                        // \r
+            {{0x40, 0x7C, 0x7E, 0x7C, 0x40, 0x40, 0x40, 0x00}},           // \14 flag
+            {{0x3C, 0x42, 0xA5, 0x81, 0xA5, 0x99, 0x42, 0x3C}},           // \15 face
+        };
+        constexpr int kIconAdvance = 9;
+        bool is_text_icon(int cp)
+        {
+            return cp > 0 && cp < 16 && cp != 9 && cp != 10 && cp != 13 &&
+                   (kTextIcons[cp].rows[0] | kTextIcons[cp].rows[3]) != 0;
+        }
+    } // namespace
+
     int text_width(const char* text)
     {
         if (!g_ready)
@@ -155,7 +189,10 @@ namespace lazy100::font
                 continue;
             }
             const int cp = next_cp(p);
-            w += glyph_for(cp).advance;
+            if (cp >= 0x20 && cp < 127)
+                w += kTicFontW[cp] + 1;
+            else
+                w += is_text_icon(cp) ? kIconAdvance : glyph_for(cp).advance;
         }
         return w;
     }
@@ -176,7 +213,31 @@ namespace lazy100::font
                 baseline = y + g_ascentPx;
                 continue;
             }
-            const int    cp = next_cp(p);
+            const int cp = next_cp(p);
+            if (cp >= 0x20 && cp < 127) // latin: crisp proportional bitmap glyphs
+            {
+                const unsigned char* g = kTicFont[cp];
+                for (int r = 0; r < 6; ++r) // rows 0-4 body, row 5 descenders (g/p/q/y)
+                {
+                    const u8 bits = g[r];
+                    if (!bits)
+                        continue;
+                    for (int i = 0; i < 5; ++i)
+                        if (bits >> i & 1)
+                            fb.pset(cx + i, y + 2 + r, c); // +2 centers the 6px cell in the 10px line
+                }
+                cx += kTicFontW[cp] + 1;
+                continue;
+            }
+            if (is_text_icon(cp))
+            {
+                for (int j = 0; j < 8; ++j)
+                    for (int i = 0; i < 8; ++i)
+                        if (kTextIcons[cp].rows[j] & (0x80 >> i))
+                            fb.pset(cx + i, y + 1 + j, c);
+                cx += kIconAdvance;
+                continue;
+            }
             const Glyph& gl = glyph_for(cp);
             for (int j = 0; j < gl.h; ++j)
             {

@@ -2,4 +2,4 @@
 // Compiled into the host binary target (see examples/xmake.lua). Paths are relative to
 // this .rc file. Resource id 1001 = the font (see source/lazy100/vfs/embed.cpp).
 
-1001 RCDATA "../assets/fonts/fusion-pixel-10px-monospaced-zh_hans.ttf"
+1001 RCDATA "../assets/fonts/fusion-pixel-8px-monospaced-zh_hans.ttf"
