@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAZY-100 — Fantasy Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="view-home">
+  <header class="topbar">
+    <span class="brand" id="home-link">
+      <span class="c">L</span><span class="c">A</span><span class="c">Z</span><span class="c">Y</span><span class="c">-</span><span class="c">1</span><span class="c">0</span><span class="c">0</span><span class="cur">_</span>
+    </span>
+    <span class="sub">fantasy console</span>
+    <nav class="nav">
+      <button class="tab" data-view="home">Home</button>
+      <button class="tab" data-view="carts">Carts</button>
+      <button class="tab" data-view="console">Console</button>
+    </nav>
+    <a class="ghlink" href="https://github.com/zzxzzk115/Lazy-100" target="_blank" rel="noopener">GitHub ▸</a>
+  </header>
+
+  <main class="main">
+    <!-- Home: featured cartridges flanking the console -->
+    <aside class="rail" id="rail-left"></aside>
+
+    <!-- The embedded console. One canvas / one wasm module, shared by every view. -->
+    <section class="stage">
+      <div class="cart">
+        <div class="ridges"></div>
+        <div class="screen">
+          <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()" width="960" height="720"></canvas>
+          <div class="overlay" id="overlay"><div class="spinner"></div><div id="status">Loading…</div></div>
+        </div>
+        <div class="cart-label" id="cart-label"><b>LAZY</b>-100</div>
+      </div>
+    </section>
+
+    <aside class="rail" id="rail-right"></aside>
+
+    <!-- Shown (via body.too-small) when the viewport is below a 1x console fit -->
+    <div class="toosmall" id="toosmall">the window is too small<br>resize to fit the console</div>
+
+    <!-- Carts: searchable / filterable browser -->
+    <section class="browser" id="browser">
+      <div class="browser-head">
+        <input class="search" id="search" type="text" placeholder="search carts…" autocomplete="off">
+        <div class="chips" id="chips"></div>
+      </div>
+      <div class="grid" id="grid"></div>
+      <div class="empty" id="empty" hidden>no carts match.</div>
+    </section>
+
+    <!-- Console: the full online console + terminal log -->
+    <section class="terminal" id="terminal">
+      <div class="term-bar">
+        <span class="term-title">console</span>
+        <span class="hint">insert a <code>.lz100.png</code> / <code>.lz100</code>, or type <code>help</code></span>
+        <button class="btn" id="pick" type="button">▸ Insert cartridge</button>
+        <input id="file" type="file" accept=".png,.lz100,.lua" multiple hidden>
+      </div>
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span id="foot">boot…</span>
+    <span class="spacer"></span>
+    <span class="muted">carts from <a href="https://github.com/zzxzzk115/Lazy-100-games" target="_blank" rel="noopener">Lazy-100-games</a></span>
+  </footer>
+
+  <script>
+    /* Emscripten Module wiring — MUST run before lazy100.js. Adapted from web/shell.html:
+       canvas target, log routing, and the IDBFS preRun gate so a previous session's
+       /carts and /saves are restored before main() starts. site.js adds the catalog UI. */
+    (function () {
+      var canvas = document.getElementById("canvas");
+      var overlay = document.getElementById("overlay");
+      var statusEl = document.getElementById("status");
+      var logEl = document.getElementById("log");
+      var footEl = document.getElementById("foot");
+      var lines = 0, MAX = 800;
+
+      window.lzAppendLog = function (text, cls) {
+        if (text == null) return;
+        var msg = String(text);
+        if (footEl) footEl.textContent = msg;
+        var div = document.createElement("div");
+        div.className = cls || "l"; div.textContent = msg;
+        logEl.appendChild(div);
+        if (++lines > MAX && logEl.firstChild) { logEl.removeChild(logEl.firstChild); lines--; }
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+
+      var Module = window.Module || {};
+      Module.canvas = canvas;
+      Module.print = function (t) { window.lzAppendLog(t, "l"); };
+      Module.printErr = function (t) { window.lzAppendLog(t, /error|fail|abort/i.test(String(t)) ? "e" : "w"); };
+      Module.setStatus = function (t) { if (statusEl) statusEl.textContent = t || "Running"; };
+      Module.preRun = Module.preRun || [];
+      Module.preRun.push(function () {
+        try {
+          var f = (typeof FS !== "undefined") ? FS : Module.FS;
+          try { f.mkdir("/carts"); } catch (e) {}
+          try { f.mkdir("/saves"); } catch (e) {}
+          var idbfs = f.filesystems && f.filesystems.IDBFS;
+          var addDep = Module.addRunDependency, remDep = Module.removeRunDependency;
+          if (!idbfs || !addDep || !remDep) { window.lzAppendLog("no IDBFS - storage is session-only", "w"); return; }
+          f.mount(idbfs, {}, "/carts");
+          f.mount(idbfs, {}, "/saves");
+          addDep("lz-idbfs");
+          f.syncfs(true, function (err) { if (err) window.lzAppendLog("storage load failed: " + err, "w"); remDep("lz-idbfs"); });
+        } catch (e) { window.lzAppendLog("storage init failed: " + e, "w"); }
+      });
+      Module.onRuntimeInitialized = function () {
+        window.lzReady = true;
+        overlay.classList.add("hidden");
+        window.lzAppendLog("ready", "ok");
+        if (window.lzOnReady) window.lzOnReady();
+      };
+      Module.onAbort = function (what) { window.lzAppendLog("ABORT: " + what, "e"); overlay.classList.remove("hidden"); statusEl.textContent = "aborted"; };
+      setTimeout(function () { overlay.classList.add("hidden"); }, 8000);
+      window.Module = Module;
+    })();
+  </script>
+  <script src="lazy100.js"></script>
+  <script src="site.js"></script>
+</body>
+</html>

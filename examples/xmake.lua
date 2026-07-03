@@ -49,8 +49,12 @@ target("lazy100")
         -- gates main() on them, and un-exported they are undefined there (boot then dies
         -- silently in preRun and the page never leaves "standby").
         add_ldflags("-sFORCE_FILESYSTEM=1",
-                    "-sEXPORTED_RUNTIME_METHODS=FS,addRunDependency,removeRunDependency",
+                    "-sEXPORTED_RUNTIME_METHODS=FS,ccall,addRunDependency,removeRunDependency",
                     {force = true})
+        -- The site (web/site) drives the embedded console from JS: it writes a fetched .lz100.png
+        -- into MEMFS and ccalls lazy100_boot_cart to play it in place. Keep _main too, since
+        -- setting EXPORTED_FUNCTIONS otherwise drops emscripten's default _main export.
+        add_ldflags("-sEXPORTED_FUNCTIONS=['_main','_lazy100_boot_cart']", {force = true})
         -- explore downloads (emscripten_fetch) + persistent storage: /carts and /saves are
         -- IDBFS mounts (IndexedDB), loaded in preRun (see web/shell.html) and flushed after
         -- writes via vfs::persist_flush().
