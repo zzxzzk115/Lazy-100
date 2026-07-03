@@ -25,6 +25,7 @@ namespace lazy100
         void poll();       // refresh held state from the keyboard (once per render frame)
         void begin_step(); // compute pressed edges + auto-repeat (before _update)
         void end_step();   // latch prev = held (after _update)
+        void inject(u32 held) { held_ = held; } // headless/test: set held state without a keyboard
 
         bool held(int button, int player = 0) const;
         bool pressed(int button, int player = 0) const;

@@ -27,7 +27,7 @@ namespace lazy100::vfs
     bool init()
     {
         g_builtin = std::make_shared<vfilesystem::MemoryFileSystem>();
-        put("fonts/fusion-pixel-10px-monospaced-zh_hans.ttf", embed::builtin_font());
+        put("fonts/fusion-pixel-8px-monospaced-zh_hans.ttf", embed::builtin_font());
         return true;
     }
 

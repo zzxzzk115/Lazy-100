@@ -19,7 +19,7 @@ target("lazy100")
         -- No in-binary asset embedding on wasm: bake the font into MEMFS at /lazy100_font.ttf
         -- (read back via std::ifstream in embed.cpp), mirroring the .rc/.S delivery on desktop.
         add_ldflags("--embed-file=" .. path.join(os.projectdir(),
-                    "assets/fonts/fusion-pixel-10px-monospaced-zh_hans.ttf") .. "@/lazy100_font.ttf",
+                    "assets/fonts/fusion-pixel-8px-monospaced-zh_hans.ttf") .. "@/lazy100_font.ttf",
                     {force = true})
         -- VRI's GL backend targets WebGL2 (GLES3) through Emscripten's GLFW3 + FULL_ES3 ports;
         -- FULL_ES3 supplies the ES3 entry points it calls (glMapBufferRange, glTexStorage2D/3D,

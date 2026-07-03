@@ -26,3 +26,6 @@ if not is_plat("wasm") then
     -- instead (built-in, -sFETCH), so no curl there.
     add_requires("libcurl")
 end
+
+-- vendored: the p8-dialect Lua fork (see z8lua/xmake.lua)
+includes("z8lua")

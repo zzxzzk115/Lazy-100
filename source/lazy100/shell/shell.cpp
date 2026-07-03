@@ -161,7 +161,9 @@ namespace lazy100
             }
             std::error_code          ec;
             std::string              found;
-            for (const std::string& cand : {arg, arg + ".lz100", arg + ".png", arg + ".lua"})
+            for (const std::string& cand :
+                 {arg, arg + ".lz100", arg + ".lz100.png", arg + ".png", arg + ".lua", arg + ".p8",
+                  arg + ".p8.png"})
             {
                 const fs::path p = fs::path(cwd_) / cand;
                 if (fs::exists(p, ec))
@@ -195,6 +197,10 @@ namespace lazy100
             std::string name = arg;
             if (name.find('.') == std::string::npos)
                 name += ".lz100";
+            // Our cart-image exports are named .lz100.png so they can't be mistaken for other
+            // consoles' shareable PNGs (plain old .png exports still load fine).
+            if (name.ends_with(".png") && !name.ends_with(".lz100.png"))
+                name.insert(name.size() - 4, ".lz100");
             const std::string p = (fs::path(cwd_) / name).generic_string();
             if (con.save_cart_file(p))
                 print_line("saved " + strip_root(p));

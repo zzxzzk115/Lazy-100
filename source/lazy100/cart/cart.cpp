@@ -148,21 +148,31 @@ namespace lazy100::cart
                 tiles[t] = static_cast<u8>((hi << 4) | lo);
         }
 
-        // __sfx__: 65 bytes per pattern (speed + 32 notes * 2 bytes: pitch, wave|vol<<3|effect<<6).
+        // __sfx__: per pattern, header + 32 notes * 2 bytes (pitch, wave|vol<<3|effect<<6).
+        // Header is 3 bytes (speed, loop_start, loop_end) since loop support; older carts wrote
+        // just the speed byte, so the record size tells the two forms apart. The effect's third
+        // bit rides in bit 7 of the pitch byte (pitch itself is 0..63).
         {
-            const std::vector<u8> b   = hex_to_bytes(sfxHex);
-            constexpr size_t      rec = 1 + SfxPattern::kSteps * 2;
+            const std::vector<u8> b      = hex_to_bytes(sfxHex);
+            constexpr size_t      recOld = 1 + SfxPattern::kSteps * 2;
+            constexpr size_t      recNew = 3 + SfxPattern::kSteps * 2;
+            const bool   isNew = b.size() >= recNew * SoundBank::kSfxCount;
+            const size_t rec   = isNew ? recNew : recOld;
             for (size_t s = 0; s < SoundBank::kSfxCount && (s + 1) * rec <= b.size(); ++s)
             {
                 SfxPattern&  pat  = bank.sfx[s];
                 const u8*    r    = &b[s * rec];
                 pat.speed         = r[0] ? r[0] : 1;
+                pat.loop_start    = isNew ? r[1] : 0;
+                pat.loop_end      = isNew ? r[2] : 0;
+                const u8* nb      = r + (isNew ? 3 : 1);
                 for (int n = 0; n < SfxPattern::kSteps; ++n)
                 {
-                    const u8 pitch  = r[1 + n * 2];
-                    const u8 packed = r[2 + n * 2];
-                    pat.notes[n]    = {pitch, static_cast<u8>(packed & 0x7), static_cast<u8>((packed >> 3) & 0x7),
-                                       static_cast<u8>((packed >> 6) & 0x3)};
+                    const u8 pitch  = nb[n * 2];
+                    const u8 packed = nb[n * 2 + 1];
+                    pat.notes[n] = {static_cast<u8>(pitch & 0x3f), static_cast<u8>(packed & 0x7),
+                                    static_cast<u8>((packed >> 3) & 0x7),
+                                    static_cast<u8>(((packed >> 6) & 0x3) | ((pitch >> 5) & 0x4))};
                 }
             }
         }
@@ -249,9 +259,11 @@ namespace lazy100::cart
         {
             const SfxPattern& pat = bank.sfx[s];
             put_byte(out, pat.speed);
+            put_byte(out, pat.loop_start);
+            put_byte(out, pat.loop_end);
             for (const SfxNote& note : pat.notes)
             {
-                put_byte(out, note.pitch);
+                put_byte(out, static_cast<u8>((note.pitch & 0x3f) | ((note.effect & 0x4) << 5)));
                 put_byte(out, static_cast<u8>((note.wave & 0x7) | ((note.vol & 0x7) << 3) | ((note.effect & 0x3) << 6)));
             }
             out += '\n';

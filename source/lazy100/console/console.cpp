@@ -2,6 +2,7 @@
 
 #include "lazy100/cart/cart.hpp"
 #include "lazy100/cart/cartpng.hpp"
+#include "lazy100/cart/p8.hpp"
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/boot.hpp"
 #include "lazy100/console/config.hpp"
@@ -11,8 +12,11 @@
 #include "lazy100/video/font.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
+#include <cstdlib>
 #include <fstream>
+#include <thread>
 #include <sstream>
 #include <vector>
 
@@ -68,6 +72,7 @@ namespace lazy100
         audio_.init(); // non-fatal: sfx() is a no-op if the device can't start
 
         lua_.init(*this);
+        p8vm_.init(*this);
         new_cart();
 
         // Every power-on plays the splash. A supplied cart is loaded now but only started once
@@ -98,6 +103,10 @@ namespace lazy100
         label_.clear();
         cartdata_id_.clear(); // the save slot belongs to the previous cart
         cartdata_.fill(0.0);
+        cart_path_.clear();
+        p8ram_.clear();
+        p8_raw_code_.clear();
+        lang_p8_  = false;
         has_cart_ = false;
     }
 
@@ -195,6 +204,40 @@ namespace lazy100
 
     bool Console::load_cart_file(const std::string& path)
     {
+        if (path.ends_with(".p8")) // classic text cart: import through the p8 ext layer
+        {
+            std::ifstream f(path, std::ios::binary);
+            if (!f)
+            {
+                LZ_ERROR("cannot open cart %s", path.c_str());
+                return false;
+            }
+            std::stringstream ss;
+            ss << f.rdbuf();
+            if (!p8::import_text(ss.str(), code_, sheet_, map_, sounds_, &p8ram_, &p8_raw_code_))
+                return false;
+            p8ram_.resize(0x10000, 0); // full 64KB address space; upper half survives load()
+            label_.clear();
+            has_cart_ = !code_.empty();
+            cart_path_ = path;
+            lang_p8_   = std::getenv("LZ100_TRANSPILE") == nullptr; // native z8lua by default
+            LZ_INFO("cart loaded (p8 %s): %s", lang_p8_ ? "z8lua" : "transpiled", path.c_str());
+            return true;
+        }
+        if (path.ends_with(".png") && p8::is_png_cart(path)) // 160x205 shareable p8 cart
+        {
+            if (!p8::import_png(path, code_, sheet_, map_, sounds_, &p8ram_, &p8_raw_code_))
+                return false;
+            p8ram_.resize(0x10000, 0); // full 64KB address space; upper half survives load()
+            label_.clear();
+            has_cart_ = !code_.empty();
+            cart_path_ = path;
+            lang_p8_   = std::getenv("LZ100_TRANSPILE") == nullptr;
+            LZ_INFO("cart loaded (p8 png, %s): %s", lang_p8_ ? "z8lua" : "transpiled", path.c_str());
+            return true;
+        }
+        p8ram_.clear(); // native cart: peek/poke go inert
+        lang_p8_ = false;
         if (path.ends_with(".png")) // a cart PNG: extract the hidden .lz100 text, then parse it
         {
             std::string text;
@@ -202,6 +245,8 @@ namespace lazy100
                 return false;
             cart::parse(text, code_, sheet_, map_, sounds_, label_);
             has_cart_ = !code_.empty();
+            cart_path_ = path;
+            detect_language();
             LZ_INFO("cart loaded (png): %s", path.c_str());
             return true;
         }
@@ -215,8 +260,30 @@ namespace lazy100
         ss << f.rdbuf();
         cart::parse(ss.str(), code_, sheet_, map_, sounds_, label_);
         has_cart_ = !code_.empty();
+        cart_path_ = path;
+        detect_language();
         LZ_INFO("cart loaded: %s", path.c_str());
         return true;
+    }
+
+    void Console::detect_language()
+    {
+        // A native (.lz100/.lua) cart may opt into the p8 language for superset play: the
+        // p8 dialect + our full 320x240 API. `--language:p8` anywhere in the source selects it;
+        // `--language:lz100` (or nothing) keeps the native Lua 5.4 VM.
+        const auto has = [&](const char* tag)
+        {
+            const std::string t = tag;
+            size_t            i = code_.find(t);
+            return i != std::string::npos;
+        };
+        if (has("--language:p8") || has("--language: p8"))
+        {
+            lang_p8_      = true;
+            p8_raw_code_  = code_;
+            if (p8ram_.empty())
+                p8ram_.assign(0x10000, 0); // superset p8 carts still get addressable RAM
+        }
     }
 
     bool Console::save_cart_file(const std::string& path)
@@ -271,19 +338,71 @@ namespace lazy100
         reset_draw_pal();
         reset_transparent();
         lua_.init(*this);
+        p8vm_.init(*this);
         new_cart();
         if (!load_cart_file(cart_path))
             return false;
-        if (!lua_.load_source(code_))
+        if (lang_p8_)
+        {
+            if (!p8vm_.load_source(p8_raw_code_))
+                return false;
+        }
+        else if (!lua_.load_source(code_))
             return false;
-        lua_.call_init();
-        lua_.call_draw();
+        cart_init();
+        // A loader cart may request another cart (multi-cart games): resolve the chain here,
+        // waiting on downloads, so the shot shows the real game rather than a loading screen.
+        for (int guard = 0; guard < 600 && load_pending(); ++guard) // <= ~30 s of downloading
+        {
+            process_pending_load();
+            if (load_fetching())
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        // LZ100_FRAMES=N runs N update+draw frames before the shot (dev aid: many carts show
+        // a splash/menu on frame 1; multi-cart loaders need a few frames to resolve the swap).
+        int frames = 1;
+        if (const char* fenv = std::getenv("LZ100_FRAMES"))
+            frames = std::max(1, std::atoi(fenv));
+        // LZ100_KEYS scripts per-frame gamepad input for headless flight/menu testing: one char
+        // per logic frame from l/r/u/d/o/x (any others = no buttons), driving btn/btnp via the
+        // begin_step/end_step edge machinery. Held is latched at the last char once exhausted.
+        const char* keys    = std::getenv("LZ100_KEYS");
+        const size_t keylen = keys ? std::strlen(keys) : 0;
+        auto keymask = [](char ch) -> u32 {
+            switch (ch)
+            {
+                case 'l': return 1u << Input::Left;
+                case 'r': return 1u << Input::Right;
+                case 'u': return 1u << Input::Up;
+                case 'd': return 1u << Input::Down;
+                case 'o': return 1u << Input::O;
+                case 'x': return 1u << Input::X;
+                default: return 0u;
+            }
+        };
+        for (int f = 0; f < frames; ++f)
+        {
+            if (load_pending())
+                process_pending_load();
+            if (keys)
+            {
+                input_.inject(keymask(keys[std::min<size_t>(f, keylen ? keylen - 1 : 0)]));
+                input_.begin_step();
+                cart_update();
+                input_.end_step();
+            }
+            else
+                cart_update(); // the frame order is update-then-draw; carts rely on it
+            cart_draw();
+        }
 
+        mode_                = ConsoleMode::Running;  // so present_framebuffer() bakes the screen palette
+        Framebuffer&    disp = present_framebuffer(); // bakes the p8 screen palette into the viewport
         std::vector<u8> rgba(static_cast<size_t>(kScreenW) * kScreenH * 4);
         for (u32 y = 0; y < kScreenH; ++y)
             for (u32 x = 0; x < kScreenW; ++x)
             {
-                const Color32 c   = palette_.get(framebuffer_.pget(static_cast<int>(x), static_cast<int>(y)));
+                const Color32 c   = palette_.get(disp.pget(static_cast<int>(x), static_cast<int>(y)));
                 u8*           dst = &rgba[(static_cast<size_t>(y) * kScreenW + x) * 4];
                 dst[0]            = c.r;
                 dst[1]            = c.g;
@@ -295,16 +414,212 @@ namespace lazy100
 
     bool Console::start_cart()
     {
-        if (code_.empty())
+        if (lang_p8_ ? p8_raw_code_.empty() : code_.empty())
             return false;
-        if (!lua_.load_source(code_)) // compile from the current source; errors are logged
+        if (lang_p8_)
+        {
+            if (!p8vm_.load_source(p8_raw_code_)) // z8lua runs the dialect directly
+                return false;
+        }
+        else if (!lua_.load_source(code_)) // native: compile from source; errors are logged
             return false;
         set_camera(0, 0);          // per-cart draw state starts clean
         framebuffer_.clip_reset();
+        framebuffer_.fillp_reset();
+        // NOTE: the screen palette is reset inside p8vm_.load_source (above), BEFORE the cart's
+        // top-level code runs - so a cart that sets its palette at load time (marble_merger) keeps
+        // it. Resetting here would wipe that, which is why it is deliberately not done here.
         has_cart_ = true;
-        lua_.call_init();
+        cart_init();
         mode_ = ConsoleMode::Running;
         return true;
+    }
+
+    // ---- VM dispatch: the active language picks the z8lua p8 VM or the native Lua VM ----
+    void Console::cart_init()
+    {
+        if (lang_p8_)
+            p8vm_.call_init();
+        else
+            lua_.call_init();
+    }
+    void Console::cart_update()
+    {
+        if (lang_p8_)
+            p8vm_.call_update();
+        else
+            lua_.call_update();
+    }
+    void Console::cart_draw()
+    {
+        if (lang_p8_)
+            p8vm_.call_draw();
+        else
+            lua_.call_draw();
+    }
+    bool Console::cart_wants_60hz() const
+    {
+        return lang_p8_ ? p8vm_.wants_60hz() : lua_.wants_60hz();
+    }
+
+    // The framebuffer to present. When a running p8 cart has set a screen palette, bake that
+    // index->index remap into a scratch copy over the 128x128 viewport only, so the game's custom
+    // palette recolors its own screen without repainting our chrome/shell (which draw outside it).
+    // Every other case presents the live framebuffer untouched (no per-frame copy).
+    Framebuffer& Console::present_framebuffer()
+    {
+        if (!(lang_p8_ && mode_ == ConsoleMode::Running && screen_pal_active_))
+            return framebuffer_;
+
+        present_fb_       = framebuffer_; // pixels + clip state; we bake straight into the raw buffer
+        u8*        px     = present_fb_.pixels_mut();
+        const auto W      = Framebuffer::width();
+        constexpr int OX = 96, OY = 56; // the centered 128x128 viewport (matches P8Vm)
+        for (int y = OY; y < OY + 128; ++y)
+        {
+            u8* row = px + static_cast<size_t>(y) * W;
+            for (int x = OX; x < OX + 128; ++x)
+                row[x] = screen_pal_[row[x] & 0x0f];
+        }
+        return present_fb_;
+    }
+
+    void Console::process_pending_load()
+    {
+        namespace fs = std::filesystem;
+        if (pending_load_.empty())
+            return;
+
+        // Finish (or fail) an in-flight BBS download first.
+        if (load_fetching_)
+        {
+            if (!load_fetch_.done())
+                return; // still downloading: the caller keeps the current frame frozen
+            load_fetching_ = false;
+            if (!load_fetch_.ok())
+            {
+#if defined(__EMSCRIPTEN__)
+                // Browsers block the BBS host (no CORS headers). Retry once through a public
+                // CORS proxy before giving up.
+                if (!load_proxy_tried_ && !pending_load_.empty() && pending_load_[0] == '#')
+                {
+                    load_proxy_tried_ = true;
+                    const std::string id = pending_load_.substr(1);
+                    std::string       direct =
+                        "https://www.lexaloffle.com/bbs/get_cart.php?cat=7&play_src=2&lid=" + id;
+                    std::string enc;
+                    for (const char c : direct)
+                    {
+                        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')
+                            enc += c;
+                        else
+                        {
+                            char buf[4];
+                            std::snprintf(buf, sizeof(buf), "%%%02X",
+                                          static_cast<unsigned char>(c));
+                            enc += buf;
+                        }
+                    }
+                    LZ_WARN("load %s: direct fetch blocked (browser CORS); retrying via proxy",
+                            pending_load_.c_str());
+                    load_fetch_.start("https://api.allorigins.win/raw?url=" + enc);
+                    load_fetching_ = true;
+                    return;
+                }
+                LZ_ERROR("load %s: download failed (%s). Browsers block this host; upload the "
+                         "cart into carts/bbs/ instead",
+                         pending_load_.c_str(), load_fetch_.error().c_str());
+#else
+                LZ_ERROR("load %s: download failed (%s)", pending_load_.c_str(),
+                         load_fetch_.error().c_str());
+#endif
+                pending_load_.clear();
+                return;
+            }
+            std::error_code ec;
+            fs::create_directories(fs::path(load_cache_).parent_path(), ec);
+            std::ofstream f(load_cache_, std::ios::binary);
+            f.write(reinterpret_cast<const char*>(load_fetch_.data().data()),
+                    static_cast<std::streamsize>(load_fetch_.data().size()));
+            f.close();
+            vfs::persist_flush(); // web: the downloaded cart survives reloads (IndexedDB)
+        }
+        else if (!pending_load_.empty() && pending_load_[0] == '#')
+        {
+            // BBS cart: use the local cache when present, else fetch it.
+            const std::string id = pending_load_.substr(1);
+            load_cache_          = "carts/bbs/" + id + ".p8.png";
+            if (!fs::exists(load_cache_))
+            {
+                LZ_INFO("load %s: fetching from the BBS", pending_load_.c_str());
+                load_fetch_.start("https://www.lexaloffle.com/bbs/get_cart.php?cat=7&play_src=2&lid=" + id);
+                load_fetching_ = true;
+                return;
+            }
+        }
+        else
+        {
+            // Local cart: as given, beside the current cart, with the usual extensions.
+            std::vector<std::string> cand = {pending_load_};
+            if (!cart_path_.empty())
+                cand.push_back((fs::path(cart_path_).parent_path() / pending_load_).string());
+            for (const std::string& base : std::vector<std::string>(cand))
+                for (const char* ext : {".p8", ".p8.png", ".lz100", ".lz100.png"})
+                    cand.push_back(base + ext);
+            load_cache_.clear();
+            for (const std::string& c : cand)
+                if (fs::exists(c))
+                {
+                    load_cache_ = c;
+                    break;
+                }
+            // Back-navigation fallback: multi-cart games load their launcher by its canonical
+            // name, but the file on disk may carry a browser suffix ("name-1.p8.png").
+            if (load_cache_.empty() && !prev_cart_path_.empty())
+            {
+                const std::string want = fs::path(pending_load_).stem().string();
+                const std::string have = fs::path(prev_cart_path_).filename().string();
+                if (!want.empty() && have.rfind(want, 0) == 0)
+                    load_cache_ = prev_cart_path_;
+            }
+            if (load_cache_.empty())
+            {
+                LZ_ERROR("load %s: no such cart", pending_load_.c_str());
+                pending_load_.clear();
+                return;
+            }
+        }
+
+        // Swap: the upper 32KB of p8 RAM carries over (multi-cart games pass data there).
+        LZ_INFO("load %s -> %s", pending_load_.c_str(), load_cache_.c_str());
+        pending_load_.clear();
+        prev_cart_path_ = cart_path_;
+        std::vector<u8> himem;
+        if (p8ram_.size() >= 0x10000)
+            himem.assign(p8ram_.begin() + 0x8000, p8ram_.end());
+        audio_.stop_music();
+        audio_.stop_sfx(-1);
+        if (load_cart_file(load_cache_))
+        {
+            if (!himem.empty() && p8ram_.size() >= 0x10000)
+                std::copy(himem.begin(), himem.end(), p8ram_.begin() + 0x8000);
+            if (!start_cart())
+                mode_ = ConsoleMode::Shell;
+        }
+        else
+            mode_ = ConsoleMode::Shell;
+    }
+
+    bool Console::reset_cart()
+    {
+        audio_.stop_music();
+        audio_.stop_sfx(-1);
+        // A file-born cart re-imports so poked assets (and a p8 cart's RAM) go back to the
+        // pristine ROM; an editor-born cart just re-runs its current sources.
+        if (!cart_path_.empty())
+            load_cart_file(cart_path_);
+        return start_cart();
     }
 
     bool Console::tooltip_active(int id, bool over)
@@ -416,6 +731,13 @@ namespace lazy100
             }
             case ConsoleMode::Running:
             {
+                // A p8 load() request freezes the cart on its last frame (loader carts draw
+                // their own "loading" screen) while the swap resolves/downloads.
+                if (load_pending())
+                {
+                    process_pending_load();
+                    break;
+                }
                 // ESC pauses the cart (music included) under a popup menu instead of leaving
                 // immediately.
                 if (keyboard_.pressed(Keyboard::Escape))
@@ -427,7 +749,7 @@ namespace lazy100
                     }
                     else
                     {
-                        pause_menu_.open(with_exit({"continue", "edit", "explore", "shell"}));
+                        pause_menu_.open(with_exit({"continue", "reset cart", "edit", "explore", "shell"}));
                         audio_.pause_music(true);
                     }
                 }
@@ -439,31 +761,34 @@ namespace lazy100
                     switch (pause_menu_.update(keyboard_))
                     {
                         case 0: audio_.pause_music(false); break; // continue: resume the music
-                        case 1: mode_ = ConsoleMode::Editor; break;
-                        case 2: mode_ = ConsoleMode::Explore; break;
-                        case 3: mode_ = ConsoleMode::Shell; break;
-                        case 4: running_ = false; break;
+                        case 1:                                   // reset cart: restart from scratch
+                            if (!reset_cart())
+                                mode_ = ConsoleMode::Shell;
+                            break;
+                        case 2: mode_ = ConsoleMode::Editor; break;
+                        case 3: mode_ = ConsoleMode::Explore; break;
+                        case 4: mode_ = ConsoleMode::Shell; break;
+                        case 5: running_ = false; break;
                         default: break; // -1 = still open
                     }
                     if (mode_ != ConsoleMode::Running) // left the cart: silence its music
                         audio_.stop_music();
-                    pause_menu_.draw(framebuffer_);
                     run_acc_ = 0.0; // no catch-up burst when resuming
-                    break;
+                    break;         // menu is composited after the screen-palette bake, below
                 }
 
                 // 30 Hz, or 60 Hz if the cart defines _update60. Fixed logic step; render
                 // follows vsync with 0..N catch-up steps per frame.
-                const double step = lua_.wants_60hz() ? (1.0 / 60.0) : (1.0 / 30.0);
+                const double step = cart_wants_60hz() ? (1.0 / 60.0) : (1.0 / 30.0);
                 run_acc_ += dt;
                 while (run_acc_ >= step)
                 {
                     input_.begin_step(); // edges + auto-repeat sampled per logic step
-                    lua_.call_update();
+                    cart_update();
                     input_.end_step();
                     run_acc_ -= step;
                 }
-                lua_.call_draw();
+                cart_draw();
                 if (keyboard_.ctrl() && keyboard_.pressed(Keyboard::Num7))
                     capture_label(); // Ctrl+7: snapshot this frame as the cart thumbnail
                 break;
@@ -488,8 +813,7 @@ namespace lazy100
                         case 3: running_ = false; break;
                         default: break; // 0 = continue, -1 = still open
                     }
-                    pause_menu_.draw(framebuffer_);
-                    break;
+                    break; // menu composited after the bake, below
                 }
                 shell_.update(*this);
                 shell_.draw(*this, framebuffer_);
@@ -518,8 +842,7 @@ namespace lazy100
                         case 4: running_ = false; break;
                         default: break; // 0 = continue, -1 = still open
                     }
-                    pause_menu_.draw(framebuffer_);
-                    break;
+                    break; // menu composited after the bake, below
                 }
                 editor_host_.update(*this);
                 editor_host_.draw(*this, framebuffer_);
@@ -533,17 +856,25 @@ namespace lazy100
                 break;
         }
 
+        // Bake the p8 screen palette into the cart's 128x128 viewport (identity no-op in every
+        // other case), THEN composite the console's own UI on top - the pause menu and cursor
+        // must keep the shell palette, not be recolored by the running cart's screen palette.
+        Framebuffer& disp = present_framebuffer();
+
+        if (pause_menu_.is_open())
+            pause_menu_.draw(disp);
+
         // Software pixel cursor, drawn on top. Context-dependent in the editor/shell; the
         // running cart owns the screen, so we leave the cursor off there.
         if (mouse_.in_bounds())
         {
             if (mode_ == ConsoleMode::Editor)
-                cursor::draw(framebuffer_, editor_host_.cursor(*this), mouse_.x(), mouse_.y());
+                cursor::draw(disp, editor_host_.cursor(*this), mouse_.x(), mouse_.y());
             else if (mode_ == ConsoleMode::Shell || mode_ == ConsoleMode::Explore)
-                cursor::draw(framebuffer_, cursor::Arrow, mouse_.x(), mouse_.y());
+                cursor::draw(disp, cursor::Arrow, mouse_.x(), mouse_.y());
         }
 
-        present_.submit_frame(framebuffer_, palette_);
+        present_.submit_frame(disp, palette_);
         return running_;
     }
 
