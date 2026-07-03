@@ -31,7 +31,13 @@ ovalfill(x0, y0, x1, y1, [color])          -- filled ellipse in a bounding box
 print(text, [x], [y], [color])             -- draw text; returns the end x
 camera([x], [y])                           -- scroll offset for all drawing; no args resets
 clip([x], [y], [w], [h])                   -- restrict drawing to a rect; no args resets
+fillp([pattern], [color2])                 -- 4x4 dither for shapes; set bits draw color2
+                                           -- (default: skipped/transparent); no args resets
 ```
+
+`fillp` applies to `pset`, `line`, `rect(fill)`, `circ(fill)` and `oval(fill)` — not to
+sprites or `print`. The pattern is 16 bits, bit 15 = top-left of the 4x4 tile
+(e.g. `fillp(0b0101101001011010)` is a checkerboard).
 
 ## Sprites
 
@@ -64,9 +70,15 @@ palt([color], [transparent])               -- set a color's transparency; no arg
 ## Audio
 
 ```lua
-sfx(n, [channel])                          -- play sfx pattern n (channel -1 = auto)
+sfx(n, [channel], [offset], [length])      -- play sfx n from note offset for length notes
+                                           -- n = -1 stops the channel, -2 releases its loop
 music([n])                                 -- play music from pattern n; music(-1) stops
 ```
+
+Each sfx pattern also carries a **speed**, an optional **loop region** (the pattern repeats
+between loop start/end until stopped or released), and a per-note **effect**: 1 slide,
+2 vibrato, 3 drop, 4 fade in, 5 fade out, 6/7 fast/slow arpeggio. Music patterns take
+loop-start / loop-end / stop flags in the music editor.
 
 ## Input
 

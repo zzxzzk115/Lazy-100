@@ -1,5 +1,8 @@
 #include "lazy100/script/lua_api.hpp"
 
+#include "lazy100/cart/p8.hpp"
+#include "lazy100/cart/p8_font.h"
+
 #include "lazy100/audio/audio.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/console.hpp"
@@ -11,9 +14,11 @@
 #include "lazy100/video/sprites.hpp"
 #include "lazy100/world/map.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <random>
 #include <string>
 
@@ -31,6 +36,25 @@ namespace lazy100
         {
             static const auto start = std::chrono::steady_clock::now();
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        }
+
+        // Screen-palette registers (16 bytes at 0x5f10 in p8 RAM): each entry names the
+        // color an index displays as; bit 0x80 selects the extended block, which lives at
+        // 16-31 in our table. Applied whenever a poke touches the range.
+        void apply_p8_screen_pal(Console& console, size_t lo, size_t hi)
+        {
+            if (hi < 0x5f10 || lo > 0x5f1f)
+                return;
+            auto& ram = console.p8ram();
+            if (ram.size() < 0x5f20)
+                return;
+            Palette& pal = console.palette();
+            for (u32 i = 0; i < 16; ++i)
+            {
+                const u8  v   = ram[0x5f10 + i];
+                const u32 idx = static_cast<u32>(v & 0x0f) + ((v & 0x80) ? 16u : 0u);
+                pal.set(i, pal.default_at(idx));
+            }
         }
 
         // Lua numbers are doubles; the console floors coordinates so sol2
@@ -85,12 +109,35 @@ namespace lazy100
         lua.set_function("cls", [&fb](sol::optional<double> c) { fb.cls(col(c, 0)); });
         lua.set_function("pset",
                          [&fb, pen, camx, camy](double x, double y, sol::optional<double> c)
-                         { fb.pset(camx(x), camy(y), pen(c, 7)); });
+                         { fb.fpset(camx(x), camy(y), pen(c, 7)); });
         lua.set_function("pget", [&fb, camx, camy](double x, double y)
                          { return static_cast<int>(fb.pget(camx(x), camy(y))); });
         lua.set_function("rectfill",
                          [&fb, pen, camx, camy](double x0, double y0, double x1, double y1, sol::optional<double> c)
-                         { fb.rectfill(camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
+                         { fb.frectfill(camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
+        // fillp(p [, c2]): 4x4 dither pattern for the shape primitives. Set bits paint c2, or
+        // are skipped (transparent) without one. p8 carts add +0.5 for transparency and pack
+        // both colors into the draw color's nibbles - that form comes through __fillp_p8.
+        lua.set_function("fillp",
+                         [&fb](sol::optional<double> p, sol::optional<double> c2)
+                         {
+                             const double v    = p.value_or(0.0);
+                             const auto   bits = static_cast<u16>(static_cast<long long>(std::floor(v)) & 0xffff);
+                             fb.fillp_set(bits, !c2.has_value(), false,
+                                          static_cast<u8>(c2 ? (fi(*c2) & 0xff) : 0));
+                         });
+        lua.set_function("__fillp_p8",
+                         [&fb](sol::optional<double> p)
+                         {
+                             const double v      = p.value_or(0.0);
+                             const double fl     = std::floor(v);
+                             const bool   transp = (v - fl) >= 0.5; // the .5 "bit": set bits are holes
+                             fb.fillp_set(static_cast<u16>(static_cast<long long>(fl) & 0xffff),
+                                          transp, true, 0);
+                         });
+        lua.set_function("__fillp_save", [&fb]() { return static_cast<double>(fb.fillp_save()); });
+        lua.set_function("__fillp_restore",
+                         [&fb](double v) { fb.fillp_restore(static_cast<u32>(v)); });
         lua.set_function("rect",
                          [&fb, pen, camx, camy](double x0, double y0, double x1, double y1, sol::optional<double> c)
                          { draw::rect(fb, camx(x0), camy(y0), camx(x1), camy(y1), pen(c, 7)); });
@@ -201,16 +248,21 @@ namespace lazy100
                          [dpal, &pal, &console](sol::optional<double> c0, sol::optional<double> c1,
                                                 sol::optional<double> p)
                          {
+                             Framebuffer& fbp = console.framebuffer();
                              if (!c0 || !c1)
                              {
                                  console.reset_draw_pal();
                                  pal.reset(); // screen palette back to default
+                                 fbp.fillp_secondary_reset();
                                  return;
                              }
                              const int a = fi(*c0) & (kPaletteSize - 1);
                              const int b = fi(*c1) & (kPaletteSize - 1);
-                             if (fi(p, 0) == 1)
+                             const int m = fi(p, 0);
+                             if (m == 1)
                                  pal.set(a, pal.default_at(b)); // screen: index a shows b's default color
+                             else if (m == 2)
+                                 fbp.fillp_secondary(a, static_cast<u8>(fi(*c1) & 0xff)); // dither pair
                              else
                                  dpal[a] = static_cast<u8>(b); // draw: recolor a -> b on blit
                          });
@@ -225,25 +277,141 @@ namespace lazy100
                              trans[fi(*c) & (kPaletteSize - 1)] = t.value_or(true);
                          });
 
-        // ---- audio: sfx(n[,chan]) plays cart pattern n; music(n)/music(-1) start/stop ----
+        // ---- audio: sfx(n[,chan,offset,length]); music(n)/music(-1) start/stop ----
+        // A p8 cart plays from its RAM image (re-decoded on every call) rather than the parsed
+        // bank: carts with their own tracker poke the audio region between calls.
         Audio&     audio = console.audio();
         SoundBank& bank  = console.sounds();
-        lua.set_function("sfx",
-                         [&audio, &bank](double n, sol::optional<double> chan, sol::optional<double> /*off*/)
-                         {
-                             const int i = fi(n);
-                             if (i >= 0 && i < SoundBank::kSfxCount)
-                                 audio.play_sfx(bank.sfx[i], fi(chan, -1));
-                         });
+        lua.set_function(
+            "sfx",
+            [&audio, &bank, &console](double n, sol::optional<double> chan, sol::optional<double> off,
+                                      sol::optional<double> len)
+            {
+                const int i  = fi(n);
+                const int ch = fi(chan, -1);
+                if (i == -1) // stop whatever plays on the channel
+                {
+                    audio.stop_sfx(ch);
+                    return;
+                }
+                if (i == -2) // release the channel's loop (play to the end)
+                {
+                    audio.release_sfx_loop(ch);
+                    return;
+                }
+                if (i < 0 || i >= SoundBank::kSfxCount)
+                    return;
+                SfxPattern pat;
+                if (console.p8_mode())
+                {
+                    SoundBank tmp;
+                    p8::decode_audio_ram(console.p8ram().data() + 0x3100, tmp);
+                    pat = tmp.sfx[i];
+                }
+                else
+                    pat = bank.sfx[i];
+                const int o = std::clamp(fi(off, 0), 0, SfxPattern::kSteps - 1);
+                const int l = std::clamp(fi(len, SfxPattern::kSteps), 1, SfxPattern::kSteps - o);
+                if (o > 0 || l < SfxPattern::kSteps)
+                {
+                    SfxPattern sliced;
+                    sliced.speed = pat.speed;
+                    for (int s = 0; s < l; ++s)
+                        sliced.notes[s] = pat.notes[o + s];
+                    if (pat.loops())
+                    {
+                        sliced.loop_start = static_cast<u8>(std::max(0, pat.loop_start - o));
+                        sliced.loop_end   = static_cast<u8>(std::clamp(pat.loop_end - o, 0, l));
+                    }
+                    else if (l < SfxPattern::kSteps)
+                        sliced.loop_start = static_cast<u8>(l); // loop_end 0: play exactly l steps
+                    pat = sliced;
+                }
+                audio.play_sfx(pat, ch);
+            });
         lua.set_function("music",
-                         [&audio, &bank, &console](sol::optional<double> n, sol::optional<double>,
-                                                   sol::optional<double>)
+                         [&audio, &console](sol::optional<double> n, sol::optional<double>,
+                                            sol::optional<double>)
                          {
                              const int i = fi(n, 0);
                              if (i < 0)
                                  audio.stop_music();
                              else if (i < SoundBank::kMusicCount)
-                                 audio.play_music(i, console.sounds());
+                             {
+                                 if (console.p8_mode())
+                                 {
+                                     SoundBank tmp;
+                                     p8::decode_audio_ram(console.p8ram().data() + 0x3100, tmp);
+                                     audio.play_music(i, tmp);
+                                 }
+                                 else
+                                     audio.play_music(i, console.sounds());
+                             }
+                         });
+
+        // ---- p8 cart RAM (peek/poke; inert for native carts) ----
+        lua.set_function("__peek",
+                         [&console](double a) -> int
+                         {
+                             const auto& ram = console.p8ram();
+                             const auto  i   = static_cast<size_t>(fi(a));
+                             return i < ram.size() ? ram[i] : 0;
+                         });
+        lua.set_function("__poke",
+                         [&console](double a, sol::variadic_args va)
+                         {
+                             // p8 semantics: poke(addr, v1, v2, ...) writes consecutive bytes,
+                             // and values may arrive as numeric strings (carts that unpack
+                             // string-packed data poke substrings directly).
+                             auto& ram = console.p8ram();
+                             auto  i   = static_cast<size_t>(fi(a));
+                             const size_t first = i;
+                             if (va.size() == 0)
+                             {
+                                 if (i < ram.size())
+                                     ram[i] = 0;
+                                 apply_p8_screen_pal(console, i, i);
+                                 return;
+                             }
+                             for (const auto& v : va)
+                             {
+                                 int          isnum = 0;
+                                 const double d = lua_tonumberx(v.lua_state(), v.stack_index(), &isnum);
+                                 if (i < ram.size())
+                                     ram[i] = static_cast<u8>(isnum ? (fi(d) & 0xff) : 0);
+                                 ++i;
+                             }
+                             apply_p8_screen_pal(console, first, i);
+                         });
+        lua.set_function("__memcpy",
+                         [&console](double dst, double src, double len)
+                         {
+                             auto&        ram = console.p8ram();
+                             const size_t d = static_cast<size_t>(fi(dst)), s = static_cast<size_t>(fi(src));
+                             size_t       l = static_cast<size_t>(std::max(0, fi(len)));
+                             if (d >= ram.size() || s >= ram.size())
+                                 return;
+                             l = std::min({l, ram.size() - d, ram.size() - s});
+                             std::memmove(ram.data() + d, ram.data() + s, l);
+                             apply_p8_screen_pal(console, d, d + l);
+                         });
+        lua.set_function("__p8_load",
+                         [&console](const std::string& name)
+                         {
+                             if (console.p8_mode() && !name.empty())
+                                 console.request_cart_load(name);
+                         });
+        lua.set_function("__memset",
+                         [&console](double dst, double val, double len)
+                         {
+                             auto&        ram = console.p8ram();
+                             const size_t d   = static_cast<size_t>(fi(dst));
+                             if (d >= ram.size())
+                                 return;
+                             const size_t l = std::min(static_cast<size_t>(std::max(0, fi(len))),
+                                                       ram.size() - d);
+                             std::memset(ram.data() + d, fi(val) & 0xff, l);
+                             apply_p8_screen_pal(console, d, d + l);
                          });
 
         // ---- input (btn(i)/btnp(i) -> bool; no index -> bitmask) ----
@@ -320,6 +488,106 @@ namespace lazy100
         lua.set_function("dget", [&console](double i) { return console.cartdata_get(fi(i)); });
         lua.set_function("dset", [&console](double i, double v) { console.cartdata_set(fi(i), v); });
 
+        // ---- __p8_print: the ext layer's bitmap-font text (classic 8x8 cart font sheet) ----
+        // Narrow chars advance 4px, glyphs (>= 0x80, e.g. button icons) 8px, line height 6.
+        // Understands "\^w"/"\^t" wide/tall modes ("\^-w" turns off; raw control byte 6 works
+        // too) and "\n". Returns the end x in world coordinates.
+        lua.set_function("__p8_print",
+                         [&console, &fb, pen, camx, camy](sol::object text, double x, double y,
+                                                          sol::optional<double> c) -> double
+                         {
+                             const std::string s   = to_text(text);
+                             const u8          col = pen(c, 6);
+                             int               px = camx(x), py = camy(y);
+                             const int         x0 = px;
+                             bool              wide = false, tall = false;
+                             const size_t      n = s.size();
+                             for (size_t i = 0; i < n;)
+                             {
+                                 const unsigned char ch = static_cast<unsigned char>(s[i]);
+                                 // "\^X" mode commands, both as source text and as the raw byte 6
+                                 const bool esc = (ch == '\\' && i + 1 < n && s[i + 1] == '^');
+                                 if (esc || ch == 6)
+                                 {
+                                     size_t k = i + (esc ? 2 : 1);
+                                     bool   on = true;
+                                     if (k < n && s[k] == '-')
+                                     {
+                                         on = false;
+                                         ++k;
+                                     }
+                                     if (k < n && s[k] == '!' && k + 4 < n)
+                                     {
+                                         // poke-from-string: 4 hex digits of address, then
+                                         // the rest of the string as raw bytes (screen
+                                         // palette setups ship as print strings this way)
+                                         size_t addr  = 0;
+                                         bool   okhex = true;
+                                         for (size_t h = k + 1; h < k + 5; ++h)
+                                         {
+                                             const char hc = s[h];
+                                             int        hv = -1;
+                                             if (hc >= '0' && hc <= '9')
+                                                 hv = hc - '0';
+                                             else if (hc >= 'a' && hc <= 'f')
+                                                 hv = hc - 'a' + 10;
+                                             else if (hc >= 'A' && hc <= 'F')
+                                                 hv = hc - 'A' + 10;
+                                             else
+                                                 okhex = false;
+                                             addr = addr * 16 + static_cast<size_t>(hv < 0 ? 0 : hv);
+                                         }
+                                         if (okhex)
+                                         {
+                                             auto&  ram = console.p8ram();
+                                             size_t w   = addr;
+                                             for (size_t b2 = k + 5; b2 < n && w < ram.size(); ++b2, ++w)
+                                                 ram[w] = static_cast<u8>(s[b2]);
+                                             apply_p8_screen_pal(console, addr, w);
+                                             break; // the data consumed the rest of the string
+                                         }
+                                     }
+                                     if (k < n)
+                                     {
+                                         if (s[k] == 'w')
+                                             wide = on;
+                                         else if (s[k] == 't')
+                                             tall = on;
+                                     }
+                                     i = k + 1;
+                                     continue;
+                                 }
+                                 if (ch == '\n')
+                                 {
+                                     px = x0;
+                                     py += 6 * (tall ? 2 : 1);
+                                     ++i;
+                                     continue;
+                                 }
+                                 if (ch < 0x10)
+                                 {
+                                     ++i; // other control bytes: ignored
+                                     continue;
+                                 }
+                                 const unsigned char* rows = kP8Font[ch];
+                                 const int            sx = wide ? 2 : 1, sy = tall ? 2 : 1;
+                                 for (int r = 0; r < 8; ++r)
+                                 {
+                                     const unsigned char bits = rows[r];
+                                     if (!bits)
+                                         continue;
+                                     for (int gx = 0; gx < 8; ++gx)
+                                         if (bits >> gx & 1)
+                                             for (int dy = 0; dy < sy; ++dy)
+                                                 for (int dx = 0; dx < sx; ++dx)
+                                                     fb.pset(px + gx * sx + dx, py + r * sy + dy, col);
+                                 }
+                                 px += (ch < 0x80 ? 4 : 8) * sx;
+                                 ++i;
+                             }
+                             return px + console.cam_x(); // back to world coordinates
+                         });
+
         // ---- stat(n): console state queries (devkit mouse; unknown ids read 0) ----
         lua.set_function("stat",
                          [&console](double n) -> double
@@ -364,11 +632,14 @@ namespace lazy100
                 return n
             end
             function all(t)
-                local i = 0
+                -- deletion-safe iteration: carts del() the current element mid-loop, and the
+                -- next element (which slid into this slot) must not be skipped.
+                if t == nil then return function() end end
+                local i, prev = 1, nil
                 return function()
-                    if t == nil then return nil end
-                    i = i + 1
-                    return t[i]
+                    if t[i] == prev then i = i + 1 end
+                    prev = t[i]
+                    return prev
                 end
             end
             function foreach(t, f) for v in all(t) do f(v) end end
@@ -379,13 +650,52 @@ namespace lazy100
                 if v == nil then return "[nil]" end
                 return tostring(v)
             end
-            function tonum(v) return tonumber(v) end
+            function tonum(v)
+                if type(v) == "number" then return v end
+                if type(v) ~= "string" then return nil end
+                -- classic dialect extras: binary literals, with optional fixed-point fraction
+                local t = v
+                local neg = string.sub(t, 1, 1) == "-"
+                if neg then t = string.sub(t, 2) end
+                if string.sub(t, 1, 2) == "0b" then
+                    t = string.sub(t, 3)
+                    local ip, fp = t, nil
+                    local dot = string.find(t, ".", 1, true)
+                    if dot then ip = string.sub(t, 1, dot - 1) fp = string.sub(t, dot + 1) end
+                    local n = tonumber(ip == "" and "0" or ip, 2)
+                    if n == nil then return nil end
+                    if fp and #fp > 0 then
+                        local f = tonumber(fp, 2)
+                        if f == nil then return nil end
+                        n = n + f / 2 ^ #fp
+                    end
+                    return neg and -n or n
+                end
+                return tonumber(v) -- decimal and 0x (hex floats included) parse natively
+            end
             function chr(...)
                 local s = ""
                 for _, n in ipairs({...}) do s = s .. string.char(math.floor(n) % 256) end
                 return s
             end
-            function ord(s, i) if s == nil then return nil end return string.byte(s, i or 1) end
+            function ord(s, i, n)
+                if type(s) == "number" then s = tostr(s) end
+                if type(s) ~= "string" then return nil end
+                i = i and math.floor(i) or 1
+                if n ~= nil then
+                    n = math.floor(n)
+                    if n < 1 then return nil end
+                    return string.byte(s, i, i + n - 1)
+                end
+                return string.byte(s, i)
+            end
+            do -- carts iterate pairs(nil) freely; hand back an empty iterator
+                local _pairs = pairs
+                pairs = function(t)
+                    if t == nil then return function() end end
+                    return _pairs(t)
+                end
+            end
             function split(s, sep, conv)
                 if s == nil then return {} end
                 sep = sep or ","
@@ -394,7 +704,7 @@ namespace lazy100
                 if sep == "" then
                     for i = 1, #s do
                         local c = string.sub(s, i, i)
-                        out[#out + 1] = (conv and tonumber(c)) or c
+                        out[#out + 1] = (conv and tonum(c)) or c
                     end
                     return out
                 end
@@ -402,7 +712,7 @@ namespace lazy100
                 while true do
                     local pos = string.find(s, sep, start, true)
                     local piece = pos and string.sub(s, start, pos - 1) or string.sub(s, start)
-                    out[#out + 1] = (conv and tonumber(piece)) or piece
+                    out[#out + 1] = (conv and tonum(piece)) or piece
                     if not pos then break end
                     start = pos + #sep
                 end
@@ -411,14 +721,22 @@ namespace lazy100
 
             cocreate, coresume, costatus, yield =
                 coroutine.create, coroutine.resume, coroutine.status, coroutine.yield
+            unpack, pack = table.unpack, table.pack
 
             function menuitem() end
             function flip() end
-            function peek() return 0 end
-            function poke() end
-            peek2, poke2, peek4, poke4 = peek, poke, peek, poke
-            function memcpy() end
-            function memset() end
+            peek, poke = __peek, __poke
+            function peek2(a) return __peek(a) | (__peek(a + 1) << 8) end
+            function poke2(a, v) __poke(a, v & 0xff) __poke(a + 1, (v >> 8) & 0xff) end
+            function peek4(a)
+                return (__peek(a) | (__peek(a + 1) << 8) | (__peek(a + 2) << 16) | (__peek(a + 3) << 24)) / 65536
+            end
+            function poke4(a, v)
+                local i = math.floor(v * 65536)
+                __poke(a, i & 0xff) __poke(a + 1, (i >> 8) & 0xff)
+                __poke(a + 2, (i >> 16) & 0xff) __poke(a + 3, (i >> 24) & 0xff)
+            end
+            memcpy, memset = __memcpy, __memset
             function reload() end
             function cstore() end
             function extcmd() end

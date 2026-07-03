@@ -28,6 +28,7 @@ namespace lazy100::apidoc
             {"print",    "print(text, [x], [y], [color])",        "draw text; returns the end x"},
             {"camera",   "camera([x], [y])",                      "scroll offset for all drawing; no args resets"},
             {"clip",     "clip([x], [y], [w], [h])",              "restrict drawing to a rect; no args resets"},
+            {"fillp",    "fillp([pattern], [color2])",            "4x4 dither for shapes; set bits draw color2 (default: skip); no args resets"},
         };
         constexpr Fn kSprites[] = {
             {"spr",  "spr(n, x, y, [w], [h], [flip_x], [flip_y])",                   "draw sprite n (w*h block of 16px cells)"},
@@ -47,8 +48,8 @@ namespace lazy100::apidoc
             {"palt", "palt([color], [transparent])", "set a color's transparency; no args resets"},
         };
         constexpr Fn kAudio[] = {
-            {"sfx",   "sfx(n, [channel])", "play sfx pattern n (channel -1 = auto)"},
-            {"music", "music([n])",        "play music from pattern n; music(-1) stops"},
+            {"sfx",   "sfx(n, [channel], [offset], [length])", "play sfx n from note offset for length notes; n=-1 stops the channel, -2 releases its loop"},
+            {"music", "music([n])",                            "play music from pattern n; music(-1) stops"},
         };
         constexpr Fn kInput[] = {
             {"btn",  "btn([b], [player])",  "button held? no args = bitmask"},

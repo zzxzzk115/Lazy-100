@@ -31,7 +31,13 @@ ovalfill(x0, y0, x1, y1, [color])          -- 外接框内的实心椭圆
 print(text, [x], [y], [color])             -- 绘制文本;返回结束处的 x
 camera([x], [y])                           -- 所有绘制的滚动偏移;无参数则复位
 clip([x], [y], [w], [h])                   -- 限制绘制到矩形区域;无参数则复位
+fillp([pattern], [color2])                 -- 形状类图元的 4x4 抖动图案;为 1 的位画 color2
+                                           -- (缺省则跳过/透明);无参数复位
 ```
+
+`fillp` 作用于 `pset`、`line`、`rect(fill)`、`circ(fill)`、`oval(fill)`,不作用于精灵和
+`print`。图案为 16 位,bit 15 = 4x4 单元的左上角
+(例如 `fillp(0b0101101001011010)` 是棋盘格)。
 
 ## 精灵
 
@@ -64,9 +70,14 @@ palt([color], [transparent])               -- 设置某颜色的透明性;无参
 ## 音频
 
 ```lua
-sfx(n, [channel])                          -- 播放音效模式 n(channel -1 = 自动)
+sfx(n, [channel], [offset], [length])      -- 从第 offset 个音符起播放 length 个音符
+                                           -- n = -1 停止该声道,-2 释放其循环
 music([n])                                 -- 从模式 n 播放音乐;music(-1) 停止
 ```
+
+每条音效模式还带有**速度**、可选的**循环区间**(在 loop start/end 之间反复,直到停止或
+释放),以及逐音符**效果器**:1 滑音、2 颤音、3 下坠、4 淡入、5 淡出、6/7 快/慢琶音。
+音乐模式在音乐编辑器中可设 循环起点 / 循环终点 / 停止 旗标。
 
 ## 输入
 
