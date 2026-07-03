@@ -1,5 +1,6 @@
 #include "lazy100/explore/explore.hpp"
 
+#include "lazy100/cart/cartpng.hpp"
 #include "lazy100/common/log.hpp"
 #include "lazy100/console/console.hpp"
 #include "lazy100/console/pausemenu.hpp"
@@ -43,7 +44,13 @@ namespace lazy100
             std::string              cartUrl, previewUrl;
         };
 
-        std::string local_cart_path(const Game& g) { return "carts/" + g.id + ".lz100"; }
+        // Keep the catalog cart's extension so load_cart_file picks the right importer: a PNG
+        // cartridge (.lz100.png) is decoded as an image, a bare .lz100 as text.
+        std::string local_cart_path(const Game& g)
+        {
+            const bool png = g.cartUrl.size() >= 4 && g.cartUrl.compare(g.cartUrl.size() - 4, 4, ".png") == 0;
+            return "carts/" + g.id + (png ? ".lz100.png" : ".lz100");
+        }
 
         // Nearest palette entry for an RGB color, memoized (previews have few unique colors).
         u8 nearest_index(const Palette& pal, u8 r, u8 g, u8 b, std::unordered_map<u32, u8>& memo)
@@ -130,6 +137,7 @@ namespace lazy100
         std::string previewFetchingId;
         net::Fetch cartFetch;
         std::string cartFetchingId;
+        std::string cartFetchTarget; // local path to write the download to (keeps the cart extension)
 
         // ESC pause-style popup (shared component): continue / shell / quit.
         PauseMenu menu;
@@ -195,8 +203,11 @@ namespace lazy100
                     if (e.contains("tags"))
                         for (const auto& t : e["tags"])
                             g.tags.push_back(t.get<std::string>());
-                    g.cartUrl    = kCatalogBase + e.at("cart").get<std::string>();
-                    g.previewUrl = kCatalogBase + e.at("preview").get<std::string>();
+                    g.cartUrl = kCatalogBase + e.at("cart").get<std::string>();
+                    // A PNG cartridge doubles as its own preview, so `preview` is optional now:
+                    // fall back to the cart image (decode_preview nearest-samples any size).
+                    g.previewUrl = kCatalogBase + (e.contains("preview") ? e.at("preview").get<std::string>()
+                                                                          : e.at("cart").get<std::string>());
                     games.push_back(std::move(g));
                 }
                 phase  = Phase::Ready;
@@ -219,14 +230,20 @@ namespace lazy100
             if (unsigned char* img = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()),
                                                            &w, &h, &n, 4))
             {
+                // A .lz100.png cartridge holds the 320x240 screenshot at a fixed offset within a
+                // larger card: crop just that region for the preview. Any other image (a distinct
+                // preview) is nearest-sampled whole onto the 320x240 grid.
+                const bool isCart = w == cartpng::kShotW + 2 * cartpng::kShotX && h >= cartpng::kShotY + cartpng::kShotH;
+                const int  ox = isCart ? cartpng::kShotX : 0;
+                const int  oy = isCart ? cartpng::kShotY : 0;
+                const int  sw = isCart ? cartpng::kShotW : w;
+                const int  sh = isCart ? cartpng::kShotH : h;
                 pv.px.resize(Framebuffer::pixel_count());
                 for (u32 y = 0; y < kScreenH; ++y)
                     for (u32 x = 0; x < kScreenW; ++x)
                     {
-                        // Nearest-sample arbitrary sizes onto the 320x240 grid (official
-                        // previews are exactly 320x240, so this is the identity for them).
-                        const u32            sx = x * static_cast<u32>(w) / kScreenW;
-                        const u32            sy = y * static_cast<u32>(h) / kScreenH;
+                        const u32            sx = ox + x * static_cast<u32>(sw) / kScreenW;
+                        const u32            sy = oy + y * static_cast<u32>(sh) / kScreenH;
                         const unsigned char* p  = &img[(static_cast<size_t>(sy) * w + sx) * 4];
                         pv.px[y * kScreenW + x] = nearest_index(pal, p[0], p[1], p[2], quantMemo);
                     }
@@ -330,7 +347,7 @@ namespace lazy100
                 {
                     std::error_code ec;
                     fs::create_directories("carts", ec);
-                    std::ofstream out("carts/" + cartFetchingId + ".lz100", std::ios::binary | std::ios::trunc);
+                    std::ofstream out(cartFetchTarget, std::ios::binary | std::ios::trunc);
                     out.write(reinterpret_cast<const char*>(cartFetch.data().data()),
                               static_cast<std::streamsize>(cartFetch.data().size()));
                     out.close();
@@ -356,7 +373,8 @@ namespace lazy100
                 else if (!cartFetch.active())
                 {
                     cartFetchingId = g.id;
-                    status         = "downloading " + g.id + "...";
+                    cartFetchTarget = local;
+                    status          = "downloading " + g.id + "...";
                     cartFetch.start(g.cartUrl);
                 }
             }

@@ -15,8 +15,9 @@ namespace lazy100
     {
         namespace fs = std::filesystem;
 
-        const char* const kCommands[] = {"help", "ls",   "cd",   "pwd",  "cls", "exit",
-                                         "run",  "edit", "load", "save", "new", "explore"};
+        const char* const kCommands[] = {"help", "ls",     "cd",     "pwd",   "cls",  "exit",
+                                         "run",  "edit",   "load",   "save",  "new",  "explore",
+                                         "title", "author"};
 
         // Path shown to the user, without the sandbox "carts/" prefix.
         std::string strip_root(const std::string& p)
@@ -202,10 +203,39 @@ namespace lazy100
             if (name.ends_with(".png") && !name.ends_with(".lz100.png"))
                 name.insert(name.size() - 4, ".lz100");
             const std::string p = (fs::path(cwd_) / name).generic_string();
+            if (name.ends_with(".lz100.png"))
+            {
+                // Cartridge export: confirm title + author first (the footer needs them). Seed the
+                // defaults from the cart (title -> filename stem) and the persistent author.
+                pending_save_ = p;
+                if (con.cart_meta().title.empty())
+                    con.cart_meta().title = name.substr(0, name.find('.'));
+                if (con.cart_meta().author.empty())
+                    con.cart_meta().author = con.user_author();
+                prompt_ = 1;
+                print_line("cart title (enter to keep):");
+                return;
+            }
             if (con.save_cart_file(p))
                 print_line("saved " + strip_root(p));
             else
                 print_line("save failed");
+        }
+        else if (cmd == "title")
+        {
+            if (!arg.empty())
+                con.cart_meta().title = arg;
+            print_line("title: " + (con.cart_meta().title.empty() ? std::string("(none)") : con.cart_meta().title));
+        }
+        else if (cmd == "author")
+        {
+            // Persistent, like `git config user.name`: remembered across carts.
+            if (!arg.empty())
+            {
+                con.set_user_author(arg);
+                con.cart_meta().author = arg;
+            }
+            print_line("author: " + (con.user_author().empty() ? std::string("(none)") : con.user_author()));
         }
         else
             print_line("unknown command: " + cmd);
@@ -311,11 +341,44 @@ namespace lazy100
             history_next();
         if (kb.pressed(Keyboard::Return))
         {
-            print_line(display_cwd(cwd_) + "> " + input_);
-            if (!input_.empty())
-                history_.push_back(input_);
-            exec(con, input_);
-            input_.clear();
+            if (prompt_ != 0) // answering the save-time title/author prompt
+            {
+                const std::string ans = input_; // blank keeps the pre-filled value
+                input_.clear();
+                if (prompt_ == 1)
+                {
+                    if (!ans.empty())
+                        con.cart_meta().title = ans;
+                    print_line("title: " + con.cart_meta().title);
+                    prompt_ = 2;
+                    print_line("author (enter to keep):");
+                    input_ = con.cart_meta().author; // pre-fill with the persistent/default author
+                }
+                else
+                {
+                    if (!ans.empty())
+                    {
+                        con.cart_meta().author = ans;
+                        con.set_user_author(ans); // remember it for next time (git-config-like)
+                    }
+                    prompt_ = 0;
+                    if (con.save_cart_file(pending_save_))
+                        print_line("saved " + strip_root(pending_save_));
+                    else
+                        print_line("save failed");
+                    pending_save_.clear();
+                }
+            }
+            else
+            {
+                print_line(display_cwd(cwd_) + "> " + input_);
+                if (!input_.empty())
+                    history_.push_back(input_);
+                exec(con, input_);
+                input_.clear();
+                if (prompt_ == 1) // save just started a prompt: pre-fill the title
+                    input_ = con.cart_meta().title;
+            }
             hist_pos_ = static_cast<int>(history_.size());
             stash_.clear();
         }
@@ -338,7 +401,10 @@ namespace lazy100
             y += lh;
         }
 
-        const std::string prompt = display_cwd(cwd_) + "> " + input_;
+        const std::string label  = prompt_ == 1   ? "title: "
+                                    : prompt_ == 2 ? "author: "
+                                                   : display_cwd(cwd_) + "> ";
+        const std::string prompt = label + input_;
         const int         cx     = font::print(fb, prompt.c_str(), 4, y, 7);
         if ((blink_ / 20) % 2 == 0)
             fb.rectfill(cx, y, cx + 1, y + lh - 3, 7); // blinking cursor

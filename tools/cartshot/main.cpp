@@ -72,11 +72,15 @@ int main(int argc, char** argv)
         return 2;
     }
     lazy100::Console console;
-    if (!console.headless_shot(argv[1], argv[2]))
+    const std::string out = argv[2];
+    // A .lz100.png output packs a playable cart PNG (cover + hidden cart data); any other
+    // output is a plain 320x240 preview image.
+    const bool pack = out.size() >= 10 && out.compare(out.size() - 10, 10, ".lz100.png") == 0;
+    if (pack ? !console.headless_pack(argv[1], out) : !console.headless_shot(argv[1], out))
     {
-        std::fprintf(stderr, "cartshot: failed to render %s\n", argv[1]);
+        std::fprintf(stderr, "cartshot: failed to %s %s\n", pack ? "pack" : "render", argv[1]);
         return 1;
     }
-    std::printf("cartshot: %s -> %s (320x240)\n", argv[1], argv[2]);
+    std::printf("cartshot: %s -> %s (%s)\n", argv[1], argv[2], pack ? "cart png" : "320x240");
     return 0;
 }

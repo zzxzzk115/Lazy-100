@@ -59,13 +59,14 @@ namespace lazy100::cart
     } // namespace
 
     bool parse(const std::string& text, std::string& code, SpriteSheet& sheet, Map& map, SoundBank& bank,
-               CartLabel& label)
+               CartLabel& label, CartMeta& meta)
     {
         code.clear();
         sheet.clear();
         map.clear();
         bank.clear();
         label.clear();
+        meta = {};
 
         std::string gfxHex, gffHex, mapHex, sfxHex, musicHex, labelHex;
         bool        sawSection = false;
@@ -116,7 +117,12 @@ namespace lazy100::cart
                 case Sec::Sfx: sfxHex += line; break;
                 case Sec::Music: musicHex += line; break;
                 case Sec::Label: labelHex += line; break;
-                case Sec::None: break; // header lines / unknown sections
+                case Sec::None: // header lines: pull out the title/author metadata
+                    if (line.rfind("title ", 0) == 0)
+                        meta.title = line.substr(6);
+                    else if (line.rfind("author ", 0) == 0)
+                        meta.author = line.substr(7);
+                    break;
             }
         }
 
@@ -206,12 +212,16 @@ namespace lazy100::cart
     }
 
     std::string serialize(const std::string& code, const SpriteSheet& sheet, const Map& map, const SoundBank& bank,
-                          const CartLabel& label)
+                          const CartLabel& label, const CartMeta& meta)
     {
         std::string out;
         out.reserve(static_cast<size_t>(kSheet) * kSheet * 2 + static_cast<size_t>(Map::kW) * Map::kH * 2 +
                     code.size() + 256);
         out += "lazy-100 cartridge\nversion 1\n";
+        if (!meta.title.empty())
+            out += "title " + meta.title + "\n";
+        if (!meta.author.empty())
+            out += "author " + meta.author + "\n";
 
         out += "__lua__\n";
         out += code;

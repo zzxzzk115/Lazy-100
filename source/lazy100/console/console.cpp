@@ -75,10 +75,24 @@ namespace lazy100
         p8vm_.init(*this);
         new_cart();
 
+        // Persistent author identity (git-config-like); default author when exporting a cart.
+        if (std::ifstream af("saves/author.txt"); af)
+        {
+            std::getline(af, user_author_);
+            while (!user_author_.empty() && (user_author_.back() == '\r' || user_author_.back() == '\n'))
+                user_author_.pop_back();
+        }
+
         // Every power-on plays the splash. A supplied cart is loaded now but only started once
         // the splash ends (so its _init and music don't run under the chime); a bare boot drops
         // into the game browser (the shell stays one menu action away).
+        // Desktop drops into the game browser; the web build embeds in the site (which owns cart
+        // discovery via its own Carts page), so it lands on the shell prompt instead.
+#if defined(__EMSCRIPTEN__)
+        boot_next_ = ConsoleMode::Shell;
+#else
         boot_next_ = ConsoleMode::Explore;
+#endif
         if (cart_path && load_cart_file(cart_path))
             boot_next_ = ConsoleMode::Running;
         else if (cart_path)
@@ -101,6 +115,7 @@ namespace lazy100
         map_.clear();
         sounds_.clear();
         label_.clear();
+        cart_meta_ = {};
         cartdata_id_.clear(); // the save slot belongs to the previous cart
         cartdata_.fill(0.0);
         cart_path_.clear();
@@ -168,6 +183,17 @@ namespace lazy100
             f << v << '\n';
         f.close();
         vfs::persist_flush(); // web: schedule the IndexedDB sync
+    }
+
+    void Console::set_user_author(const std::string& a)
+    {
+        user_author_ = a;
+        std::error_code ec;
+        std::filesystem::create_directories("saves", ec);
+        std::ofstream f("saves/author.txt", std::ios::trunc);
+        f << a << '\n';
+        f.close();
+        vfs::persist_flush(); // web: keep the author across reloads (IndexedDB)
     }
 
     void Console::render_first_frame_label(CartLabel& out)
@@ -243,7 +269,7 @@ namespace lazy100
             std::string text;
             if (!cartpng::load(path, text))
                 return false;
-            cart::parse(text, code_, sheet_, map_, sounds_, label_);
+            cart::parse(text, code_, sheet_, map_, sounds_, label_, cart_meta_);
             has_cart_ = !code_.empty();
             cart_path_ = path;
             detect_language();
@@ -258,7 +284,7 @@ namespace lazy100
         }
         std::stringstream ss;
         ss << f.rdbuf();
-        cart::parse(ss.str(), code_, sheet_, map_, sounds_, label_);
+        cart::parse(ss.str(), code_, sheet_, map_, sounds_, label_, cart_meta_);
         has_cart_ = !code_.empty();
         cart_path_ = path;
         detect_language();
@@ -304,10 +330,19 @@ namespace lazy100
             CartLabel cover = label_;
             if (!cover.present)
                 render_first_frame_label(cover);
+            // Footer title/author: the cart's own metadata; the title falls back to the filename.
+            std::string title = cart_meta_.title;
+            if (title.empty())
+            {
+                title           = std::filesystem::path(path).filename().string();
+                const auto dot  = title.find('.');
+                if (dot != std::string::npos)
+                    title = title.substr(0, dot);
+            }
             // The label is drawn on the cover but NOT hidden in the payload: a full-res screenshot
             // barely compresses and would make the PNG very tall. So embed the cart without it.
-            if (!cartpng::save(path, cart::serialize(code_, sheet_, map_, sounds_, CartLabel {}), cover, sheet_,
-                               palette_))
+            if (!cartpng::save(path, cart::serialize(code_, sheet_, map_, sounds_, CartLabel {}, cart_meta_), cover,
+                               sheet_, palette_, title, cart_meta_.author))
                 return false;
             LZ_INFO("cart saved (png): %s", path.c_str());
             vfs::persist_flush();            // web: keep the save across reloads (IndexedDB)
@@ -320,12 +355,29 @@ namespace lazy100
             LZ_ERROR("cannot write cart %s", path.c_str());
             return false;
         }
-        f << cart::serialize(code_, sheet_, map_, sounds_, label_);
+        f << cart::serialize(code_, sheet_, map_, sounds_, label_, cart_meta_);
         f.close();
         LZ_INFO("cart saved: %s", path.c_str());
         vfs::persist_flush();
         vfs::offer_download(path.c_str()); // web: download the .lz100
         return true;
+    }
+
+    bool Console::headless_pack(const std::string& cart_path, const std::string& out_png)
+    {
+        // Same minimal init as headless_shot (no window/GPU/audio/input), then export a cart
+        // PNG: save_cart_file renders the first-frame cover (render_first_frame_label) itself.
+        vfs::init();
+        if (!font::init())
+            LZ_WARN("font not loaded; cart label may be blank");
+        reset_draw_pal();
+        reset_transparent();
+        lua_.init(*this);
+        p8vm_.init(*this);
+        new_cart();
+        if (!load_cart_file(cart_path))
+            return false;
+        return save_cart_file(out_png);
     }
 
     bool Console::headless_shot(const std::string& cart_path, const std::string& out_png)
@@ -432,6 +484,22 @@ namespace lazy100
         has_cart_ = true;
         cart_init();
         mode_ = ConsoleMode::Running;
+        return true;
+    }
+
+    bool Console::restart_with_cart(const std::string& path)
+    {
+        if (!load_cart_file(path))
+            return false;
+        // Replay the power-on splash, then start the cart (the Boot case hands off to start_cart
+        // when boot_next_ is Running). web_started_ is forced: the JS call already came from a
+        // user click, so the audio is unlocked and we skip the "click to start" gate.
+        boot_next_   = ConsoleMode::Running;
+        web_started_ = true;
+        boot_jingle_ = false;
+        boot_t_      = 0.0;
+        boot_warm_t_ = 0.0;
+        mode_        = ConsoleMode::Boot;
         return true;
     }
 

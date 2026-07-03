@@ -1,5 +1,7 @@
 lazy-100 cartridge
 version 1
+title Breakout
+author Lazy_V
 __lua__
 -- breakout.lz100 - Lazy-100 demo: sprite bricks/paddle/ball, map background,
 -- sfx + a chained looping soundtrack. Arrows move, Z launches.

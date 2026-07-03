@@ -11,6 +11,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -19,10 +21,13 @@ namespace lazy100::cartpng
 {
     namespace
     {
-        constexpr int     kMX     = 10; // side margin around the picture
-        constexpr int     kTop    = 10; // margin above the picture
-        constexpr int     kW      = CartLabel::kW + 2 * kMX; // 340: full-res label + margins
-        constexpr int     kSheet  = 256; // fallback sprite-sheet picture (when no label captured)
+        // Cartridge cover layout (widths/gaps around the fixed kShot* screenshot region).
+        constexpr int     kW      = kShotW + 2 * kShotX; // 352: card width
+        constexpr int     kHeader = 20;                  // header band height (matches kShotY math)
+        constexpr int     kGap1   = 8;                   // header -> screenshot
+        constexpr int     kGap2   = 10;                  // screenshot -> footer
+        constexpr int     kBot    = 12;                  // bottom margin
+        constexpr int     kSheet  = 256;                 // fallback sprite-sheet picture (no label)
         constexpr uint8_t kMagic[4] = {'L', 'Z', '1', 'P'};
 
         void put32(std::vector<uint8_t>& v, uint32_t x)
@@ -93,7 +98,8 @@ namespace lazy100::cartpng
     } // namespace
 
     bool save(const std::string& path, const std::string& cartText, const CartLabel& label,
-              const SpriteSheet& sheet, const Palette& pal)
+              const SpriteSheet& sheet, const Palette& pal, const std::string& title,
+              const std::string& author)
     {
         // Payload = magic + rawLen + rleLen + RLE bytes.
         const std::vector<uint8_t> rle = rle_encode(cartText);
@@ -103,16 +109,16 @@ namespace lazy100::cartpng
         put32(payload, static_cast<uint32_t>(rle.size()));
         payload.insert(payload.end(), rle.begin(), rle.end());
 
-        // ---- cover layout: [top margin][picture][footer wordmark] ----
-        const int picW    = label.present ? CartLabel::kW : kSheet; // full-res label, or sheet fallback
-        const int picH    = label.present ? CartLabel::kH : kSheet;
-        const int picX    = (kW - picW) / 2;
-        const int lh      = font::line_height();
-        const int footerH = (lh > 0 ? lh : 14) + 12;
-        const int coverH  = kTop + picH + footerH;
-        const int W       = kW;
-        const int needH   = static_cast<int>((payload.size() + W - 1) / W);
-        const int H       = needH > coverH ? needH : coverH; // grow past the cover only if data needs it
+        // ---- cartridge cover: rounded card = header band + 320x240 screenshot + footer band ----
+        const int lh       = font::line_height() > 0 ? font::line_height() : 8;
+        const int picX     = kShotX; // fixed screenshot offset (mirrors cartpng.hpp for cropping)
+        const int picY     = kShotY;
+        const int footerY  = picY + kShotH + kGap2;
+        const int footerH  = 3 * lh + 14; // up to three text lines + padding
+        const int coverH   = footerY + footerH + kBot;
+        const int W        = kW;
+        const int needH    = static_cast<int>((payload.size() + W - 1) / W);
+        const int H        = needH > coverH ? needH : coverH; // grow past the cover only if data needs it
 
         std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4);
         auto set = [&](int x, int y, u8 r, u8 g, u8 b)
@@ -120,10 +126,12 @@ namespace lazy100::cartpng
             if (x < 0 || y < 0 || x >= W || y >= H)
                 return;
             uint8_t* d = &px[(static_cast<size_t>(y) * W + x) * 4];
-            d[0] = r;
-            d[1] = g;
-            d[2] = b;
-            d[3] = 255;
+            d[0] = r; d[1] = g; d[2] = b; d[3] = 255;
+        };
+        auto fill = [&](int x0, int y0, int x1, int y1, u8 r, u8 g, u8 b)
+        {
+            for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x) set(x, y, r, g, b);
         };
         auto frame = [&](int x0, int y0, int x1, int y1, u8 r, u8 g, u8 b)
         {
@@ -131,48 +139,102 @@ namespace lazy100::cartpng
             for (int y = y0; y <= y1; ++y) { set(x0, y, r, g, b); set(x1, y, r, g, b); }
         };
 
-        for (int y = 0; y < H; ++y) // cartridge shell
-            for (int x = 0; x < W; ++x)
-                set(x, y, 24, 26, 44);
-        frame(1, 1, W - 2, coverH - 2, 70, 78, 120);                        // card edge
-        frame(picX - 1, kTop - 1, picX + picW, kTop + picH, 70, 78, 120);   // picture bezel
+        // Cartridge palette (kept independent of the cart's own palette swaps).
+        constexpr u8 bodyR = 33, bodyG = 37, bodyB = 58;   // card body
+        constexpr u8 bandR = 49, bandG = 55, bandB = 84;   // header/footer bands
+        constexpr u8 bzlR = 96, bzlG = 104, bzlB = 148;    // screenshot bezel
+        constexpr u8 outR = 12, outG = 14, outB = 30;      // outside the rounded card (blends w/ page)
+        constexpr u8 txtR = 240, txtG = 241, txtB = 245;   // title text
+        constexpr u8 mutR = 150, mutG = 156, mutB = 180;   // muted text (author / URL / "cartridge")
 
-        // Picture: the captured full-res label, else the sprite sheet.
-        for (int py = 0; py < picH; ++py)
-            for (int pxx = 0; pxx < picW; ++pxx)
+        fill(0, 0, W - 1, H - 1, bodyR, bodyG, bodyB);              // card body
+        fill(0, coverH, W - 1, H - 1, outR, outG, outB);           // data-only rows below the card
+        fill(kShotX - 4, 4, W - kShotX + 3, picY - kGap1, bandR, bandG, bandB);          // header band
+        fill(kShotX - 4, footerY - 4, W - kShotX + 3, coverH - 6, bandR, bandG, bandB);  // footer band
+        frame(picX - 2, picY - 2, picX + kShotW + 1, picY + kShotH + 1, bzlR, bzlG, bzlB); // bezel
+
+        // Screenshot: the captured full-res label, else the sprite sheet in the top-left.
+        for (int py = 0; py < kShotH; ++py)
+            for (int pxx = 0; pxx < kShotW; ++pxx)
             {
-                const u8 idx = label.present ? label.px[static_cast<size_t>(py) * CartLabel::kW + pxx]
-                                             : sheet.get(pxx, py);
+                u8 idx = 0;
+                if (label.present)
+                    idx = label.px[static_cast<size_t>(py) * CartLabel::kW + pxx];
+                else if (pxx < kSheet && py < kSheet)
+                    idx = sheet.get(pxx, py);
                 const Color32 c = pal.get(idx);
-                set(picX + pxx, kTop + py, c.r, c.g, c.b);
+                set(picX + pxx, picY + py, c.r, c.g, c.b);
             }
 
-        // Footer: the "lazy-100" wordmark in per-letter rainbow, rendered via a scratch
-        // framebuffer then composited (index 0 = transparent).
+        // ---- text: a scratch framebuffer renders each string, then we composite it ----
+        Framebuffer scratch;
+        auto text_w = [](const std::string& s) { return font::text_width(s.c_str()); };
+        auto up     = [](std::string s) { for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); return s; };
+        // Solid-colour text.
+        auto blit = [&](const std::string& s, int x, int y, u8 r, u8 g, u8 b)
+        {
+            if (s.empty()) return;
+            scratch.cls(0);
+            font::print(scratch, s.c_str(), 0, 0, 7);
+            const int tw = std::min(text_w(s), static_cast<int>(Framebuffer::width()));
+            for (int gy = 0; gy < lh; ++gy)
+                for (int gx = 0; gx < tw; ++gx)
+                    if (scratch.pget(gx, gy) != 0) set(x + gx, y + gy, r, g, b);
+        };
+        // "LAZY-100" wordmark in per-letter rainbow.
+        auto blit_brand = [&](int x, int y)
         {
             static const u8 rainbow[6] = {8, 9, 10, 11, 12, 14};
-            const char*     title = "lazy-100";
-            Framebuffer     scratch;
+            const char*     brand = "lazy-100";
             scratch.cls(0);
-            int cx = (static_cast<int>(Framebuffer::width()) - font::text_width(title)) / 2;
-            int li = 0;
-            for (const char* p = title; *p; ++p, ++li)
+            int cx = 0, li = 0;
+            for (const char* p = brand; *p; ++p, ++li)
             {
                 const char cc[2] = {*p, 0};
                 font::print(scratch, cc, cx, 0, rainbow[li % 6]);
                 cx += font::text_width(cc);
             }
-            const int fy = kTop + picH + (footerH - lh) / 2;
             for (int gy = 0; gy < lh; ++gy)
-                for (int gx = 0; gx < static_cast<int>(Framebuffer::width()); ++gx)
+                for (int gx = 0; gx < cx; ++gx)
                 {
                     const u8 idx = scratch.pget(gx, gy);
-                    if (idx == 0)
-                        continue;
-                    const Color32 c = pal.default_at(idx); // fixed rainbow, ignore cart palette swaps
-                    set(kMX + gx, fy + gy, c.r, c.g, c.b);
+                    if (idx == 0) continue;
+                    const Color32 c = pal.default_at(idx);
+                    set(x + gx, y + gy, c.r, c.g, c.b);
                 }
+            return cx;
+        };
+
+        // Header: brand on the left, "fantasy console" on the right.
+        const int hy = 4 + (kHeader - lh) / 2;
+        blit_brand(kShotX, hy);
+        blit(up("fantasy console"), W - kShotX - text_w("FANTASY CONSOLE"), hy, mutR, mutG, mutB);
+
+        // Footer: title, optional "by <author>", then "LAZY-100 CARTRIDGE".
+        {
+            int        fy   = footerY + 3;
+            const std::string t = up(title.empty() ? "untitled" : title);
+            blit(t, kShotX, fy, txtR, txtG, txtB);
+            fy += lh;
+            if (!author.empty()) { blit(up("by " + author), kShotX, fy, mutR, mutG, mutB); fy += lh; }
+            blit(up("lazy-100 cartridge"), kShotX, fy, mutR, mutG, mutB);
         }
+
+        // Round the card's corners: fill the four corner cutouts with the outside colour (opaque,
+        // so the hidden payload below still round-trips). The card looks rounded against the page.
+        constexpr int rad = 14;
+        auto cornerCut = [&](int cx, int cy, int sx, int sy)
+        {
+            for (int dy = 0; dy < rad; ++dy)
+                for (int dx = 0; dx < rad; ++dx)
+                    if (dx * dx + dy * dy > rad * rad)
+                        set(cx + sx * dx, cy + sy * dy, outR, outG, outB);
+        };
+        cornerCut(rad - 1, rad - 1, -1, -1);              // top-left
+        cornerCut(W - rad, rad - 1, 1, -1);               // top-right
+        cornerCut(rad - 1, coverH - rad, -1, 1);          // bottom-left
+        cornerCut(W - rad, coverH - rad, 1, 1);           // bottom-right
+
         // Hide the payload in the low 2 bits of each RGBA channel (1 byte per pixel).
         for (size_t i = 0; i < payload.size(); ++i)
         {

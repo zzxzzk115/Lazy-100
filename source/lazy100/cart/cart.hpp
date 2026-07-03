@@ -20,17 +20,26 @@ namespace lazy100
     //   __music__ 64 rows of 10 hex chars (flags byte + 4 channel sfx indices)
     //   __label__ 120 rows of 320 hex chars (160x120 thumbnail; present only if captured)
     // (unknown sections are skipped.)
+    // Cart metadata carried in the .lz100 header (`title`/`author` lines). Shown on the cartridge
+    // PNG's footer and in the catalog; required for a shareable cart.
+    struct CartMeta
+    {
+        std::string title;
+        std::string author;
+    };
+
     namespace cart
     {
         // Parse .lz100 text: fill `code` (__lua__) and restore `sheet` (__gfx__/__gff__),
-        // `map` (__map__), `bank` (__sfx__/__music__), `label` (__label__). A plain .lua file
-        // (no sections) is treated as code-only. Always returns a usable cart.
+        // `map` (__map__), `bank` (__sfx__/__music__), `label` (__label__), `meta` (title/author
+        // header lines). A plain .lua file (no sections) is treated as code-only. Always returns
+        // a usable cart.
         bool parse(const std::string& text, std::string& code, SpriteSheet& sheet, Map& map, SoundBank& bank,
-                   CartLabel& label);
+                   CartLabel& label, CartMeta& meta);
 
         // Serialize the current code + sprite sheet + map + sound bank (+ label, if captured) to
-        // .lz100 text.
+        // .lz100 text, with the title/author header lines.
         std::string serialize(const std::string& code, const SpriteSheet& sheet, const Map& map,
-                              const SoundBank& bank, const CartLabel& label);
+                              const SoundBank& bank, const CartLabel& label, const CartMeta& meta);
     } // namespace cart
 } // namespace lazy100

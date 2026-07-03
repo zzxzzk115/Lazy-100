@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lazy100/audio/audio.hpp"
+#include "lazy100/cart/cart.hpp"
 #include "lazy100/cart/label.hpp"
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/pausemenu.hpp"
@@ -68,10 +69,19 @@ namespace lazy100
 
         // Cart lifecycle (the .lz100 format bundles code + sprite sheet).
         std::string& code() { return code_; } // current cart's Lua source
+        CartMeta&    cart_meta() { return cart_meta_; } // title/author (cart header + cart PNG)
+
+        // Persistent author identity (like `git config user.name`): remembered across carts in a
+        // small settings file, and used as the default author when exporting a cart.
+        const std::string& user_author() const { return user_author_; }
+        void               set_user_author(const std::string& a); // stores + persists
         bool         load_cart_file(const std::string& path); // parse .lz100/.lua -> code_ + sheet_
         bool         save_cart_file(const std::string& path); // serialize code_ + sheet_ -> .lz100
         void         new_cart();                              // blank code + sprite sheet
         bool         start_cart(); // compile+init the current code and switch to Running; false if empty
+        // Load a cart and replay the power-on splash before starting it (ceremony) - the web site
+        // uses this so a clicked cartridge always boots with the animation. False if it won't load.
+        bool         restart_with_cart(const std::string& path);
         // The current cart runs in one of two VMs: the p8-dialect z8lua VM (p8 carts, or any
         // cart tagged `--language:p8`) or the native Lua 5.4 + sol2 VM. These dispatch the
         // lifecycle to whichever is active.
@@ -97,6 +107,11 @@ namespace lazy100
         // window/GPU/audio/input, and write the 320x240 framebuffer as an RGBA PNG. Used by
         // the cartshot tool to generate catalog preview images.
         bool headless_shot(const std::string& cart_path, const std::string& out_png);
+
+        // Headless cart-image pack: load `cart_path` and export it as a `.lz100.png` (a visible
+        // first-frame cover with the cart data hidden in the pixels). Used to produce the
+        // catalog's PNG cartridges without a window/GPU.
+        bool headless_pack(const std::string& cart_path, const std::string& out_png);
 
         // Render the current cart's first frame into `out` (a scratch Lua VM runs _init + one
         // _draw against this console, then per-cart draw state is reset). Used as the cart-PNG
@@ -200,6 +215,8 @@ namespace lazy100
         std::string p8_raw_code_; // p8 carts: the untranslated dialect source, run by the z8lua VM
         bool        lang_p8_ = false; // the current cart runs in the p8 VM
         CartLabel   label_; // captured thumbnail for the cart PNG (__label__ section)
+        CartMeta    cart_meta_; // title/author, carried in the cart header + shown on the cart PNG
+        std::string user_author_; // persistent default author (saves/author.txt), git-config-like
 
         std::vector<u8> p8ram_; // p8 ext cart RAM (empty unless a p8 cart is loaded)
 
