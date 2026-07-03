@@ -15,9 +15,11 @@ namespace lazy100
         icon::Id     icon() const override { return icon::TabMap; }
         void         update(Console& con) override;
         void         draw(Console& con, Framebuffer& fb) override;
+        void         draw_tools(Console& con, Framebuffer& fb) override;
         cursor::Type cursor(Console& con) const override;
 
     private:
+        bool grid_  = true; // tile-grid overlay (top-bar GRID toggle)
         int tile_  = 1; // sprite index to paint (0 = erase / empty)
         int cam_x_ = 0; // top-left visible tile column
         int cam_y_ = 0; // top-left visible tile row

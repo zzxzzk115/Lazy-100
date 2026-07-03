@@ -18,7 +18,8 @@ namespace lazy100
         cursor::Type cursor(Console& con) const override;
 
     private:
-        int color_  = 7; // current draw color
-        int sprite_ = 0; // selected sprite index 0..255
+        int color_   = 7; // current draw color
+        int sprite_  = 0; // selected sprite index 0..255
+        int pal_tab_ = 0; // palette sub tab: full grid / P8 / GB / FC subsets
     };
 } // namespace lazy100

@@ -37,9 +37,12 @@ namespace lazy100
         const Keyboard& kb = con.keyboard();
         const int       n  = count();
 
-        const int tabW = static_cast<int>(kScreenW) / n;
-        if (m.pressed(Mouse::Left) && m.y() >= 0 && m.y() < kTabH)
-            set_current(m.x() / tabW);
+        // Mode toggles live right-aligned in the bar; the left side belongs to the current
+        // editor's tool buttons, so only clicks inside the toggle strip switch modes.
+        const int cellW  = 22;
+        const int stripX = static_cast<int>(kScreenW) - n * cellW - 2;
+        if (m.pressed(Mouse::Left) && m.y() >= 0 && m.y() < kTabH && m.x() >= stripX)
+            set_current((m.x() - stripX) / cellW);
         // Ctrl+Tab / Ctrl+Shift+Tab cycles editors from the keyboard.
         if (kb.ctrl() && kb.pressed(Keyboard::Tab))
             set_current((current_ + (kb.shift() ? n - 1 : 1)) % n);
@@ -51,27 +54,29 @@ namespace lazy100
     {
         fb.cls(ui::kBg);
 
-        // Icon-only tab bar: a strip of centered glyphs, active tab lit with an accent underline.
-        const int n    = count();
-        const int W    = static_cast<int>(kScreenW);
-        const int tabW = W / n;
+        // Classic fantasy-console top bar: the current editor's tool buttons on the left,
+        // the mode toggles right-aligned, lit while active.
+        const int n      = count();
+        const int W      = static_cast<int>(kScreenW);
+        const int cellW  = 22;
+        const int stripX = W - n * cellW - 2;
         fb.rectfill(0, 0, W - 1, kTabH - 1, ui::kPanel);
         for (int i = 0; i < n; ++i)
         {
-            const int  x0     = i * tabW;
-            const int  x1     = (i == n - 1) ? W - 1 : x0 + tabW - 1;
+            const int  x0     = stripX + i * cellW;
             const bool active = (i == current_);
             if (active)
-                fb.rectfill(x0, 0, x1, kTabH - 1, ui::kHeader);
-            const int cx = x0 + (x1 - x0 + 1 - icon::kSize) / 2;
-            icon::draw(fb, editors_[i]->icon(), cx, (kTabH - icon::kSize) / 2, active ? ui::kText : ui::kDim);
-            if (i > 0)
-                ui::vdivider(fb, x0, 2, kTabH - 4, ui::kBorder); // separator between tabs
-            if (active)
-                draw::line(fb, x0 + 2, kTabH - 2, x1 - 2, kTabH - 2, ui::kAccent);
+            {
+                fb.rectfill(x0, 0, x0 + cellW - 1, kTabH - 1, ui::kBtnActive);
+                draw::line(fb, x0, kTabH - 1, x0 + cellW - 1, kTabH - 1, ui::kAccent);
+            }
+            icon::draw(fb, editors_[i]->icon(), x0 + (cellW - icon::kSize) / 2,
+                       (kTabH - icon::kSize) / 2, active ? ui::kText : ui::kDim);
         }
-        draw::line(fb, 0, kTabH, W - 1, kTabH, ui::kBorder); // bar underline
+        ui::vdivider(fb, stripX - 2, 2, kTabH - 4, ui::kBorder); // tools | toggles separator
+        draw::line(fb, 0, kTabH, W - 1, kTabH, ui::kBorder);     // bar underline
 
         editors_[current_]->draw(con, fb);
+        editors_[current_]->draw_tools(con, fb); // after draw: tool buttons sit above any clear
     }
 } // namespace lazy100

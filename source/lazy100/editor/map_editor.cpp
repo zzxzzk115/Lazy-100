@@ -84,11 +84,14 @@ namespace lazy100
                 fb.rectfill(cx, cy, cx + kTile - 1, cy + kTile - 1, 1);
                 sheet.spr(fb, n, cx, cy, 1, 1, false, false, dpal, trans);
             }
-        // Tile grid overlay.
-        for (int c = 0; c <= kCols; ++c)
-            draw::line(fb, kViewX + c * kTile, kViewY, kViewX + c * kTile, kViewY + kRows * kTile, 1);
-        for (int r = 0; r <= kRows; ++r)
-            draw::line(fb, kViewX, kViewY + r * kTile, kViewX + kCols * kTile, kViewY + r * kTile, 1);
+        // Tile grid overlay (top-bar GRID toggle).
+        if (grid_)
+        {
+            for (int c = 0; c <= kCols; ++c)
+                draw::line(fb, kViewX + c * kTile, kViewY, kViewX + c * kTile, kViewY + kRows * kTile, 5);
+            for (int r = 0; r <= kRows; ++r)
+                draw::line(fb, kViewX, kViewY + r * kTile, kViewX + kCols * kTile, kViewY + r * kTile, 5);
+        }
         draw::rect(fb, kViewX - 1, kViewY - 1, kViewX + kCols * kTile, kViewY + kRows * kTile, ui::kBorder);
 
         // ---- tools / tile preview ----
@@ -137,6 +140,17 @@ namespace lazy100
                         "arrows: pan the view\n"
                         "< > : prev / next tile\n"
                         "click the sheet to pick a tile");
+    }
+
+    void MapEditor::draw_tools(Console& con, Framebuffer& fb)
+    {
+        // Top-bar GRID toggle, lit while the overlay is on.
+        const Mouse& m = con.mouse();
+        const int    w = font::text_width("GRID") + 8;
+        fb.rectfill(4, 1, 4 + w, EditorHost::kTabH - 2, grid_ ? ui::kBtnActive : ui::kBtn);
+        font::print(fb, "GRID", 8, 3, grid_ ? ui::kText : ui::kDim);
+        if (ui::hit(m, 4, 1, w + 1, EditorHost::kTabH - 2) && m.pressed(Mouse::Left))
+            grid_ = !grid_;
     }
 
     cursor::Type MapEditor::cursor(Console& con) const

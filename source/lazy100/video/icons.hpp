@@ -33,6 +33,9 @@ namespace lazy100
             WaveTriangle,
             WaveSaw,
             WaveNoise,
+            WaveTiltedSaw,
+            WaveOrgan,
+            WavePhaser,
             Help, // '?' hint button
             Book, // manual / cheatsheet button
             Count

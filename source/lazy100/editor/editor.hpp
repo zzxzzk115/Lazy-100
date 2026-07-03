@@ -21,6 +21,9 @@ namespace lazy100
         virtual icon::Id    icon() const                 = 0; // tab-bar glyph
         virtual void        update(Console&)             {}
         virtual void        draw(Console&, Framebuffer&) = 0;
+        // Per-editor tool buttons drawn into the LEFT side of the top bar (the right side
+        // holds the mode toggles). Coordinates 0..EditorHost::kToolsW-1, y 0..kTabH-1.
+        virtual void draw_tools(Console&, Framebuffer&) {}
         // First crack at ESC (e.g. closing an overlay like the code editor's cheatsheet).
         // Return true to consume it; false lets the console open its pause menu.
         virtual bool on_escape(Console&) { return false; }
@@ -32,7 +35,8 @@ namespace lazy100
     class EditorHost
     {
     public:
-        static constexpr int kTabH = 16; // tab-bar height (editors draw below this)
+        static constexpr int kTabH   = 16;  // tab-bar height (editors draw below this)
+        static constexpr int kToolsW = 210; // left bar region reserved for the editor's tools
 
         EditorHost();
 
