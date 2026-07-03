@@ -13,10 +13,13 @@ namespace lazy100
     enum class Wave : u8
     {
         Square = 0,
-        Pulse, // 25% duty
+        Pulse, // ~31% duty
         Triangle,
         Saw,
         Noise,
+        TiltedSaw, // slow rise, fast fall
+        Organ,     // stacked triangles (octave partial)
+        Phaser,    // two slightly detuned triangles
         Count
     };
 
@@ -35,6 +38,17 @@ namespace lazy100
         static constexpr int kSteps = 32;
         std::array<SfxNote, kSteps> notes {};
         u8                          speed = 8; // 1/120 s ticks per step (bigger = slower)
+        // Loop region: while playing, step loop_end wraps back to loop_start (loop_end >
+        // loop_start). With loop_end == 0, a non-zero loop_start instead truncates the pattern
+        // to that many steps. Both 0 = plain 32-step playback.
+        u8 loop_start = 0;
+        u8 loop_end   = 0;
+
+        bool loops() const { return loop_end > loop_start; }
+        int  length() const // steps played when not looping
+        {
+            return (loop_end == 0 && loop_start > 0) ? loop_start : kSteps;
+        }
     };
 
     // One row of the song: the 4 channels play their sfx together, and rows advance in sequence.
@@ -47,6 +61,7 @@ namespace lazy100
         static constexpr int kChannels = 4;
         static constexpr u8  kLoopStart = 0x1; // flags bit: a loop returns to this pattern
         static constexpr u8  kStop      = 0x2; // flags bit: stop after this pattern (no loop)
+        static constexpr u8  kLoopEnd   = 0x4; // flags bit: after this pattern, jump to the loop start
 
         std::array<u8, kChannels> sfx {255, 255, 255, 255}; // sfx index per channel, 255 = rest
         u8                        flags = 0;                 // kLoopStart | kStop

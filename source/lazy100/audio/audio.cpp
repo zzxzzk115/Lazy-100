@@ -16,7 +16,11 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <fstream>
+#include <memory>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace lazy100
 {
@@ -25,10 +29,15 @@ namespace lazy100
         constexpr int kQueueSize = 64;
         constexpr int kChannels  = MusicPattern::kChannels; // 4
 
-        // Semitone `pitch` above C2 -> Hz. pitch 24 = C4 (~261.6 Hz).
-        double pitch_freq(int pitch) { return 65.406 * std::pow(2.0, pitch / 12.0); }
+        // Semitone `pitch` above C2 -> Hz. pitch 24 = C4 (~261.6 Hz). Fractional pitches are
+        // legal: the tracker effects (slide/vibrato/drop) bend between semitones.
+        double pitch_freq(double pitch) { return 65.406 * std::pow(2.0, pitch / 12.0); }
 
-        // One channel: a voice stepping through a copy of an SfxPattern.
+        // One channel: a voice stepping through a copy of an SfxPattern. The synth part
+        // follows fake-08: the oscillator phase carries across notes and patterns, and any
+        // harsh parameter change (volume jump, frequency jump, waveform switch) triggers a
+        // short CROSSFADE - the old oscillator keeps running and its output is blended out
+        // over ~8 ms while the new one blends in. No per-step envelope at all.
         struct Channel
         {
             bool       active    = false;
@@ -41,33 +50,74 @@ namespace lazy100
             u32        noise        = 0x2545F491u; // per-voice PRNG state (noise wave)
             double     last_noise   = 0.0;
             double     noise_hold   = 0.0;
+
+            // slide (effect 1) context: the note the previous step ended on. fake-08 notes
+            // that a fresh channel behaves as if the previous key were C-4 (24).
+            double prev_key = 24.0;
+            double prev_vol = 0.0;
+
+            // Last rendered synth parameters (for harsh-change detection)...
+            double last_freq = 0.0;
+            double last_vol  = 0.0;
+            int    last_wave = -1;
+            // ...and the snapshot the crossfade keeps playing while it dies out.
+            double fade            = 0.0; // 1 -> 0 over ~8 ms; 0 = no fade running
+            double fade_phase      = 0.0;
+            double fade_freq       = 0.0;
+            double fade_vol        = 0.0;
+            int    fade_wave       = 0;
+            double fade_last_noise = 0.0;
+            double fade_noise_hold = 0.0;
         };
 
-        // Sample the waveform at phase [0,1) for the given Channel (noise needs state).
-        double wave_sample(Wave w, double phase, Channel& c, double freq, double sr)
+        // Sample the waveform at unwrapped phase (cycles). Formulas and relative amplitudes
+        // follow zepto8's measurements of real hardware WAV exports, so the classic timbres
+        // come out right; the mixer gain compensates the lower peaks. The noise state comes in
+        // by reference so the channel's main synth and its crossfade snapshot can each keep
+        // their own random-walk history (they share the RNG, which is harmless).
+        double wave_sample(Wave w, double phase, u32& rng, double& lastNoise, double& noiseHold,
+                           double freq, double sr)
         {
+            const double t = std::fmod(phase, 1.0);
             switch (w)
             {
-                case Wave::Square: return (std::fmod(phase, 1.0) < 0.5) ? 1.0 : -1.0;
-                case Wave::Pulse: return (std::fmod(phase, 1.0) < 0.25) ? 1.0 : -1.0;
-                case Wave::Triangle: return 4.0 * std::fabs(std::fmod(phase, 1.0) - 0.5) - 1.0;
-                case Wave::Saw: return 2.0 * std::fmod(phase, 1.0) - 1.0;
+                case Wave::Square: return t < 0.5 ? 0.25 : -0.25;
+                case Wave::Pulse: return t < 0.316 ? 0.25 : -0.25;
+                case Wave::Triangle: return (1.0 - std::fabs(4.0 * t - 2.0)) * 0.5;
+                case Wave::Saw: return 0.653 * (t < 0.5 ? t : t - 1.0);
+                case Wave::TiltedSaw:
+                {
+                    constexpr double a = 0.875;
+                    return (t < a ? 2.0 * t / a - 1.0 : 2.0 * (1.0 - t) / (1.0 - a) - 1.0) * 0.5;
+                }
+                case Wave::Organ:
+                    return (t < 0.5 ? 3.0 - std::fabs(24.0 * t - 6.0)
+                                    : 1.0 - std::fabs(16.0 * t - 12.0)) /
+                           9.0;
+                case Wave::Phaser:
+                    return (2.0 - std::fabs(8.0 * t - 4.0) +
+                            (1.0 - std::fabs(4.0 * std::fmod(phase * 109.0 / 110.0, 1.0) - 2.0))) /
+                           6.0;
                 case Wave::Noise:
                 {
-                    // Re-roll white noise at roughly the note frequency for a pitched hiss.
-                    c.noise_hold -= freq / sr;
-                    if (c.noise_hold <= 0.0)
-                    {
-                        c.noise ^= c.noise << 13;
-                        c.noise ^= c.noise >> 17;
-                        c.noise ^= c.noise << 5;
-                        c.last_noise = (static_cast<double>(c.noise) / 2147483647.5) - 1.0;
-                        c.noise_hold += 1.0;
-                    }
-                    return c.last_noise;
+                    // Smoothed random walk, scaled by the note's advance rate; darker at low
+                    // pitches, brighter high (the classic hiss).
+                    constexpr double tscale = 8.858923; // 22050 / freq(top pitch)
+                    const double     scale  = (phase - noiseHold) * tscale;
+                    rng ^= rng << 13;
+                    rng ^= rng >> 17;
+                    rng ^= rng << 5;
+                    const double r  = (static_cast<double>(rng) / 2147483647.5) - 1.0;
+                    const double ns = (lastNoise + scale * r) / (1.0 + scale);
+                    noiseHold       = phase;
+                    lastNoise       = ns;
+                    const double factor =
+                        std::clamp(1.0 - std::log2(std::max(freq, 1.0) / 65.406) * 12.0 / 63.0, 0.0, 1.0);
+                    return ns * 1.5 * (1.0 + factor * factor);
                 }
                 default: return 0.0;
             }
+            (void)sr;
         }
     } // namespace
 
@@ -98,7 +148,8 @@ namespace lazy100
         struct Msg
         {
             SfxPattern pat;
-            int        channel; // 0..3, or -1 = auto
+            int        channel; // 0..3, or -1 = auto (play) / all (stop, release)
+            int        op;      // 0 = play, 1 = stop, 2 = release loop
         };
         std::atomic<uint32_t> head {0};
         std::atomic<uint32_t> tail {0};
@@ -110,6 +161,9 @@ namespace lazy100
         std::atomic<uint32_t> musicSeq {0};
         int                   musicReqIndex = -1; // written before bumping musicSeq
         std::atomic<int>      musicPos {-1};      // currently-playing pattern (audio->UI), -1 = stopped
+        // Playback positions for the editors' live highlight (audio->UI, -1 = silent).
+        std::atomic<int> musicStepPos[kChannels] {-1, -1, -1, -1};
+        std::atomic<int> sfxStepPos[kChannels] {-1, -1, -1, -1};
         std::atomic<bool>     musicPauseFlag {false}; // main->audio: freeze the sequencer in place
 
         // ---- audio-thread state ----
@@ -126,36 +180,46 @@ namespace lazy100
         // real audio (the boot chime) arrives. Counted down on the audio thread.
         std::atomic<uint32_t> warmupFrames {0};
         uint32_t              warmupNoise = 0x9E3779B9u;
-        bool     musicOn    = false;
-        int      musicCur        = 0;
-        int      musicStart      = 0;     // pattern music() started on
-        int      musicLoopTarget = 0;     // where the song loops back to (last LoopStart seen)
-        u8       musicCurFlags   = 0;     // flags of the pattern currently playing (for Stop)
-        bool     musicLoad       = false; // load musicCur at the next opportunity
-        uint32_t lastSeq         = 0;
+        bool     musicOn   = false;
+        int      musicCur  = 0;
+        int      musicStartPat = 0; // pattern music() began on: the default loop-back target
+        // The sequencer runs on a shared TICK CLOCK (fake-08 model): musicTicks advances every
+        // sample; when it reaches musicTickLen (the pattern's duration in ticks, decided by the
+        // first non-looping channel), the next pattern loads in the SAME sample - the voices
+        // never sit idle between patterns, so seams are gapless by construction.
+        double   musicTicks   = 0.0;
+        double   musicTickLen = 0.0;
+        uint32_t lastSeq      = 0;
 
         // Start `pat` on voice `c`. `trimTrailingSilence` (sfx) releases the channel right after
         // the last audible note instead of holding it through 32 steps of trailing rests — so a
         // short blip doesn't hog a channel (and mask music) for the whole pattern. Music voices
-        // pass false: they must run the full 32 steps to stay in sync with the other channels.
+        // pass false: they play all 32 steps (the length-truncating loop_start form only affects
+        // the pattern duration, a quirk fake-08 documents), and the shared clock cuts them off.
         void start_voice(Channel& c, const SfxPattern& pat, bool trimTrailingSilence)
         {
+            // phase carries over on purpose: the channel's tone generator keeps running, so a
+            // new pattern (or retriggered sfx) picks up mid-wave; the crossfade in step_voice
+            // absorbs the parameter jump.
             c.active       = true;
             c.pat          = pat;
             c.step         = 0;
             c.into_step    = 0.0;
-            c.phase        = 0.0;
             c.step_samples = pat.speed * (sampleRate / 120.0);
+            c.prev_key     = 24.0;
+            c.prev_vol     = 0.0;
             c.last_step    = SfxPattern::kSteps - 1;
-            if (trimTrailingSilence)
+            if (trimTrailingSilence && !pat.loops())
             {
-                c.last_step = 0;
-                for (int i = SfxPattern::kSteps - 1; i >= 0; --i)
+                c.last_step = pat.length() - 1; // loop_start truncates when loop_end == 0
+                int last    = 0;
+                for (int i = c.last_step; i >= 0; --i)
                     if (pat.notes[i].vol > 0)
                     {
-                        c.last_step = i;
+                        last = i;
                         break;
                     }
+                c.last_step = last;
             }
         }
 
@@ -178,51 +242,87 @@ namespace lazy100
         {
             const SoundBank& bank = bankBuf[bankActive.load(std::memory_order_acquire)];
             const MusicPattern& mp = bank.music[musicCur % SoundBank::kMusicCount];
-            musicCurFlags = mp.flags;
-            if (mp.flags & MusicPattern::kLoopStart)
-                musicLoopTarget = musicCur; // future loops return here
-            bool any = false;
+
+            // Pattern duration in ticks (fake-08 rules): the FIRST non-looping channel decides
+            // (its length in steps x its speed; the loop_start-as-length form counts here even
+            // though the voice itself plays all 32 steps). If every channel loops, the slowest
+            // one decides; with no channels at all, 32 ticks of silence keep the chain moving.
+            double lenNoLoop = -1.0, lenLooping = -1.0;
+            for (int c = 0; c < kChannels; ++c)
+            {
+                const u8 idx = mp.sfx[c];
+                if (idx >= SoundBank::kSfxCount)
+                    continue;
+                const SfxPattern& p = bank.sfx[idx];
+                if (p.loops())
+                    lenLooping = std::max(lenLooping, 32.0 * p.speed);
+                else
+                {
+                    lenNoLoop = static_cast<double>(p.length()) * p.speed;
+                    break;
+                }
+            }
+            musicTickLen = lenNoLoop > 0 ? lenNoLoop : (lenLooping > 0 ? lenLooping : 32.0);
+            musicTicks   = 0.0;
+
             for (int c = 0; c < kChannels; ++c)
             {
                 const u8 idx = mp.sfx[c];
                 if (idx < SoundBank::kSfxCount)
-                {
-                    start_voice(musicVoice[c], bank.sfx[idx], false); // full 32 steps: keep channels in sync
-                    any = true;
-                }
+                    start_voice(musicVoice[c], bank.sfx[idx], false);
                 else
-                    musicVoice[c].active = false; // 255 = this channel rests
-            }
-            if (!any)
-            {
-                // Empty pattern marks the end of the song: loop back to the loop target. If the
-                // target itself is empty, there is nothing to play, so stop.
-                if (musicCur != musicLoopTarget)
-                {
-                    musicCur  = musicLoopTarget;
-                    musicLoad = true;
-                }
-                else
-                    musicOn = false;
+                    musicVoice[c].active = false; // rest; the crossfade absorbs the drop
             }
         }
 
-        void advance_music_if_idle()
+        // Advance the shared tick clock one sample; on pattern end, chain to the next pattern
+        // IMMEDIATELY (same sample) so playback is continuous across the seam.
+        void advance_music_clock()
         {
-            if (!musicOn || musicLoad)
-                return; // a pattern load is already queued; don't advance again meanwhile
-            for (int c = 0; c < kChannels; ++c)
-                if (musicVoice[c].active)
-                    return; // still playing this pattern (independent of any sfx borrowing)
-            // Pattern finished. A Stop flag halts here; otherwise advance to the next row (the
-            // next empty/Stop row, or the table wrapping to 0, decides where the song ends/loops).
-            if (musicCurFlags & MusicPattern::kStop)
+            if (!musicOn)
+                return;
+            musicTicks += 120.0 / sampleRate;
+            if (musicTicks < musicTickLen)
+                return;
+
+            const SoundBank& bank  = bankBuf[bankActive.load(std::memory_order_acquire)];
+            const auto       empty = [&](int p)
+            {
+                if (p < 0 || p >= SoundBank::kMusicCount)
+                    return true;
+                for (const u8 s : bank.music[p].sfx)
+                    if (s < SoundBank::kSfxCount)
+                        return false;
+                return true;
+            };
+            // Loop-back target: the nearest loop-start flag at or before the current pattern,
+            // else wherever music() began - so a song without any flags still loops when it
+            // runs into an empty pattern (the natural way to author a short soundtrack).
+            const auto loopTarget = [&]
+            {
+                int t = musicCur;
+                while (t > 0 && !(bank.music[t].flags & MusicPattern::kLoopStart))
+                    --t;
+                return (bank.music[t].flags & MusicPattern::kLoopStart) ? t : musicStartPat;
+            };
+
+            const u8 flags = bank.music[musicCur % SoundBank::kMusicCount].flags;
+            int      next  = musicCur + 1;
+            if (flags & MusicPattern::kStop)
+                next = -1;
+            else if (flags & MusicPattern::kLoopEnd)
+                next = loopTarget();
+            else if (empty(next))
+                next = loopTarget(); // song ran off its end: loop the whole thing
+            if (next < 0 || empty(next))
             {
                 musicOn = false;
+                for (auto& c : musicVoice)
+                    c.active = false;
                 return;
             }
-            musicCur  = (musicCur + 1) % SoundBank::kMusicCount;
-            musicLoad = true;
+            musicCur = next;
+            load_music_pattern();
         }
 
         static void render(ma_device* dev, void* out, const void* /*in*/, ma_uint32 frames)
@@ -235,35 +335,124 @@ namespace lazy100
         // A muted voice (audible == false) still steps, so it stays in sync underneath sfx.
         void step_voice(Channel& c, double& s, bool audible)
         {
-            if (!c.active)
-                return;
-            const SfxNote& note = c.pat.notes[c.step];
-            if (note.vol > 0)
+            // Current synth parameters: the live note's, or silence when the voice is idle.
+            double freq = c.last_freq;
+            double volf = 0.0;
+            int    wave = c.last_wave < 0 ? 0 : c.last_wave;
+
+            if (c.active)
             {
-                const double freq = pitch_freq(note.pitch);
-                const double raw  = wave_sample(static_cast<Wave>(note.wave % static_cast<int>(Wave::Count)),
-                                                c.phase, c, freq, sampleRate);
-                // Click-free envelope: short attack in, short release out of each step.
-                const double atk = std::min(64.0, c.step_samples * 0.1);
-                const double rel = std::min(512.0, c.step_samples * 0.25);
-                double       env = 1.0;
-                if (c.into_step < atk)
-                    env = c.into_step / atk;
-                else if (c.into_step > c.step_samples - rel)
-                    env = std::max(0.0, (c.step_samples - c.into_step) / rel);
-                if (audible)
-                    s += raw * env * (note.vol / 7.0) * 0.22;
+                const SfxNote& note = c.pat.notes[c.step];
+                const double   pos  = c.into_step / c.step_samples; // 0..1 within the step
+                double         key  = note.pitch;
+                volf                = note.vol / 7.0;
+                wave                = note.wave % static_cast<int>(Wave::Count);
+                freq                = pitch_freq(key);
+                if (note.vol > 0)
+                {
+                    // Effects bend frequency/volume across the step (fake-08 semantics).
+                    switch (note.effect)
+                    {
+                        case 1: // slide FROM the previous note's pitch and volume
+                            freq = pitch_freq(c.prev_key) + (freq - pitch_freq(c.prev_key)) * pos;
+                            if (c.prev_vol > 0.0)
+                                volf = c.prev_vol + (volf - c.prev_vol) * pos;
+                            break;
+                        case 2: // vibrato: triangle at 7.5 Hz, depth half a semitone
+                        {
+                            const double tSec = (c.step + pos) * (c.step_samples / sampleRate);
+                            const double t =
+                                std::fabs(std::fmod(7.5 * tSec, 1.0) - 0.5) - 0.25; // -.25..+.25
+                            freq += freq * 0.059463 * t;
+                            break;
+                        }
+                        case 3: // drop: frequency falls linearly to zero across the step
+                            freq *= 1.0 - pos;
+                            break;
+                        case 4: volf *= pos; break;       // fade in
+                        case 5: volf *= 1.0 - pos; break; // fade out
+                        case 6:                            // arpeggio over the step's group of 4
+                        case 7:
+                        {
+                            // fake-08: iterate the group at speed 4 (fast) / 8 (slow) ticks per
+                            // note, halved when the sfx speed is <= 8.
+                            const int    m = (c.pat.speed <= 8 ? 32 : 16) / (note.effect == 6 ? 4 : 8);
+                            const double tSec = (c.step + pos) * (c.step_samples / sampleRate);
+                            const int    n    = static_cast<int>(m * 7.5 * tSec);
+                            freq = pitch_freq(c.pat.notes[(c.step & ~3) | (n & 3)].pitch);
+                            break;
+                        }
+                        default: break;
+                    }
+                }
+                else
+                    volf = 0.0;
+            }
+
+            // Harsh parameter change? Snapshot the old synth and crossfade to the new one over
+            // ~8 ms while BOTH keep oscillating (fake-08's declick). This is the only smoothing
+            // in the whole engine - held notes and gentle effects pass through untouched.
+            const double freqJump = std::min(freq, c.last_freq) * 0.01;
+            if (std::fabs(volf - c.last_vol) > 0.1 || std::fabs(freq - c.last_freq) > freqJump ||
+                wave != c.last_wave)
+            {
+                if (c.fade <= 0.0) // don't restart mid-fade: it would stack discontinuities
+                {
+                    c.fade_phase      = c.phase;
+                    c.fade_freq       = c.last_freq;
+                    c.fade_vol        = c.last_vol;
+                    c.fade_wave       = c.last_wave < 0 ? wave : c.last_wave;
+                    c.fade_last_noise = c.last_noise;
+                    c.fade_noise_hold = c.noise_hold;
+                }
+                c.fade  = 1.0;
+                c.phase = std::fmod(c.phase, 1.0); // keep precision over long sessions
+                c.noise_hold = c.phase;
+            }
+            c.last_freq = freq;
+            c.last_vol  = volf;
+            c.last_wave = wave;
+
+            double out = 0.0;
+            if (volf > 0.0)
+            {
+                out = wave_sample(static_cast<Wave>(wave), c.phase, c.noise, c.last_noise,
+                                  c.noise_hold, freq, sampleRate) *
+                      volf;
                 c.phase += freq / sampleRate;
             }
+            if (c.fade > 0.0)
+            {
+                double old = 0.0;
+                if (c.fade_vol > 0.0)
+                {
+                    old = wave_sample(static_cast<Wave>(c.fade_wave), c.fade_phase, c.noise,
+                                      c.fade_last_noise, c.fade_noise_hold, c.fade_freq,
+                                      sampleRate) *
+                          c.fade_vol;
+                    c.fade_phase += c.fade_freq / sampleRate;
+                }
+                out    = out + (old - out) * c.fade;
+                c.fade -= 130.0 / sampleRate; // ~8 ms crossfade
+            }
+            if (audible)
+                s += out * 0.5; // waveforms peak ~0.5
+
+            if (!c.active)
+                return;
 
             c.into_step += 1.0;
             if (c.into_step >= c.step_samples)
             {
-                c.into_step = 0.0;
-                c.phase     = 0.0;
+                c.into_step -= c.step_samples; // keep the fractional part: no per-step drift
+                const SfxNote& fin = c.pat.notes[c.step];
+                c.prev_key         = fin.pitch; // slide context for the next note
+                c.prev_vol         = fin.vol / 7.0;
                 ++c.step;
-                if (c.step > c.last_step) // past the last note to play (silence trimmed for sfx)
-                    c.active = false;
+                if (c.pat.loops() && c.step >= c.pat.loop_end)
+                    c.step = c.pat.loop_start; // looping voice: wrap and keep playing
+                else if (c.step > c.last_step) // past the last note to play
+                    c.active = false; // phase stays: the next voice on this channel continues it
             }
         }
 
@@ -273,9 +462,28 @@ namespace lazy100
             uint32_t t = tail.load(std::memory_order_relaxed);
             while (t != head.load(std::memory_order_acquire))
             {
-                const Msg& m  = queue[t % kQueueSize];
-                const int  ch = (m.channel < 0 || m.channel >= kChannels) ? pick_channel() : m.channel;
-                start_voice(sfxVoice[ch], m.pat, true); // trim trailing silence so the channel frees fast
+                const Msg& m = queue[t % kQueueSize];
+                if (m.op == 0) // play
+                {
+                    const int ch = (m.channel < 0 || m.channel >= kChannels) ? pick_channel() : m.channel;
+                    start_voice(sfxVoice[ch], m.pat, true); // trim trailing silence: frees the channel fast
+                }
+                else // stop / release-loop, on one channel or all
+                {
+                    for (int c = 0; c < kChannels; ++c)
+                    {
+                        if (m.channel >= 0 && m.channel != c)
+                            continue;
+                        if (m.op == 1)
+                            sfxVoice[c].active = false; // the crossfade absorbs the drop
+                        else if (sfxVoice[c].active && sfxVoice[c].pat.loops())
+                        {
+                            sfxVoice[c].pat.loop_start = 0; // drop the loop; play out to the end
+                            sfxVoice[c].pat.loop_end   = 0;
+                            sfxVoice[c].last_step      = SfxPattern::kSteps - 1;
+                        }
+                    }
+                }
                 ++t;
             }
             tail.store(t, std::memory_order_release);
@@ -290,16 +498,14 @@ namespace lazy100
                 {
                     musicOn = false;
                     for (auto& c : musicVoice)
-                        c.active = false;
+                        c.active = false; // the crossfade absorbs the drop
                 }
                 else
                 {
-                    musicOn         = true;
-                    musicCur        = idx;
-                    musicStart      = idx;
-                    musicLoopTarget = idx; // loop back here until a LoopStart pattern overrides it
-                    musicCurFlags   = 0;
-                    musicLoad       = true;
+                    musicOn       = true;
+                    musicCur      = idx;
+                    musicStartPat = idx;
+                    load_music_pattern();
                 }
             }
 
@@ -311,11 +517,10 @@ namespace lazy100
 
             for (ma_uint32 f = 0; f < frames; ++f)
             {
-                if (musicLoad && !paused)
-                {
-                    musicLoad = false;
-                    load_music_pattern();
-                }
+                // The shared clock chains patterns before the voices render, so the first
+                // sample of pattern N+1 directly follows the last sample of pattern N.
+                if (!paused)
+                    advance_music_clock();
 
                 double s = 0.0;
                 for (int c = 0; c < kChannels; ++c)
@@ -327,9 +532,6 @@ namespace lazy100
                         step_voice(musicVoice[c], s, !sfxActive);
                     step_voice(sfxVoice[c], s, true);
                 }
-
-                if (!paused)
-                    advance_music_if_idle();
 
                 if (warm > 0)
                 {
@@ -352,8 +554,15 @@ namespace lazy100
 
             warmupFrames.store(warm, std::memory_order_relaxed);
 
-            // Publish the playback position for the music editor's live indicator.
+            // Publish the playback positions for the editors' live indicators.
             musicPos.store(musicOn ? musicCur : -1, std::memory_order_relaxed);
+            for (int c = 0; c < kChannels; ++c)
+            {
+                musicStepPos[c].store(musicOn && musicVoice[c].active ? musicVoice[c].step : -1,
+                                      std::memory_order_relaxed);
+                sfxStepPos[c].store(sfxVoice[c].active ? sfxVoice[c].step : -1,
+                                    std::memory_order_relaxed);
+            }
         }
     };
 
@@ -442,7 +651,31 @@ namespace lazy100
         const uint32_t h  = im.head.load(std::memory_order_relaxed);
         if (h - im.tail.load(std::memory_order_acquire) >= kQueueSize)
             return; // queue full, drop
-        im.queue[h % kQueueSize] = {pat, channel};
+        im.queue[h % kQueueSize] = {pat, channel, 0};
+        im.head.store(h + 1, std::memory_order_release);
+    }
+
+    void Audio::stop_sfx(int channel)
+    {
+        if (!p_)
+            return;
+        Impl&          im = *p_;
+        const uint32_t h  = im.head.load(std::memory_order_relaxed);
+        if (h - im.tail.load(std::memory_order_acquire) >= kQueueSize)
+            return;
+        im.queue[h % kQueueSize] = {SfxPattern {}, channel, 1};
+        im.head.store(h + 1, std::memory_order_release);
+    }
+
+    void Audio::release_sfx_loop(int channel)
+    {
+        if (!p_)
+            return;
+        Impl&          im = *p_;
+        const uint32_t h  = im.head.load(std::memory_order_relaxed);
+        if (h - im.tail.load(std::memory_order_acquire) >= kQueueSize)
+            return;
+        im.queue[h % kQueueSize] = {SfxPattern {}, channel, 2};
         im.head.store(h + 1, std::memory_order_release);
     }
 
@@ -477,8 +710,68 @@ namespace lazy100
 
     int Audio::music_pattern() const { return p_ ? p_->musicPos.load(std::memory_order_relaxed) : -1; }
 
+    int Audio::music_step(int channel) const
+    {
+        if (!p_ || channel < 0 || channel >= kChannels)
+            return -1;
+        return p_->musicStepPos[channel].load(std::memory_order_relaxed);
+    }
+
+    int Audio::sfx_step(int channel) const
+    {
+        if (!p_ || channel < 0 || channel >= kChannels)
+            return -1;
+        return p_->sfxStepPos[channel].load(std::memory_order_relaxed);
+    }
+
     bool Audio::warming_up() const
     {
         return p_ && p_->warmupFrames.load(std::memory_order_relaxed) > 0;
+    }
+
+    bool Audio::debug_render_music(const SoundBank& bank, int index, double seconds,
+                                   const std::string& wav_path)
+    {
+        // A bare Impl with no device: render_block only needs the sample rate and a bank.
+        auto  imp = std::make_unique<Impl>();
+        Impl& im  = *imp;
+        im.sampleRate = 44100.0;
+        im.bankBuf[0] = bank;
+        im.bankActive.store(0);
+        im.musicReqIndex = index;
+        im.musicSeq.store(1); // lastSeq starts 0 -> the request is picked up immediately
+
+        const auto         totalFrames = static_cast<size_t>(seconds * im.sampleRate);
+        std::vector<float> mix(totalFrames * 2, 0.0f);
+        constexpr size_t   kBlock = 512;
+        for (size_t off = 0; off < totalFrames; off += kBlock)
+            im.render_block(mix.data() + off * 2, static_cast<ma_uint32>(std::min(kBlock, totalFrames - off)));
+
+        // Minimal 16-bit stereo PCM WAV.
+        std::ofstream f(wav_path, std::ios::binary);
+        if (!f)
+            return false;
+        const u32 dataBytes = static_cast<u32>(totalFrames * 2 * 2);
+        const u32 rate = 44100, byteRate = rate * 4;
+        const u16 channels = 2, bits = 16, blockAlign = 4, fmt = 1;
+        const u32 riffLen = 36 + dataBytes, fmtLen = 16;
+        f.write("RIFF", 4);
+        f.write(reinterpret_cast<const char*>(&riffLen), 4);
+        f.write("WAVEfmt ", 8);
+        f.write(reinterpret_cast<const char*>(&fmtLen), 4);
+        f.write(reinterpret_cast<const char*>(&fmt), 2);
+        f.write(reinterpret_cast<const char*>(&channels), 2);
+        f.write(reinterpret_cast<const char*>(&rate), 4);
+        f.write(reinterpret_cast<const char*>(&byteRate), 4);
+        f.write(reinterpret_cast<const char*>(&blockAlign), 2);
+        f.write(reinterpret_cast<const char*>(&bits), 2);
+        f.write("data", 4);
+        f.write(reinterpret_cast<const char*>(&dataBytes), 4);
+        for (const float s : mix)
+        {
+            const auto v = static_cast<short>(std::clamp(s, -1.0f, 1.0f) * 32767.0f);
+            f.write(reinterpret_cast<const char*>(&v), 2);
+        }
+        return f.good();
     }
 } // namespace lazy100
