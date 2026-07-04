@@ -28,9 +28,13 @@
   function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
   function absURL(p) { return /^https?:/i.test(p) ? p : CATALOG_BASE + p.replace(/^\.?\//, ""); }
   function basename(p) { return p.split("/").pop(); }
+  // raw.githubusercontent.com caches by full URL for ~5 min; a version query invalidates a
+  // cart's preview/cart the moment its games.json version is bumped, while unchanged carts
+  // keep enjoying the CDN cache.
+  function verURL(url, g) { return url + (url.indexOf("?") < 0 ? "?v=" : "&v=") + encodeURIComponent(g.version || "0"); }
   function thumbURL(g) {
     var p = g.preview || (g.cart && /\.png$/i.test(g.cart) ? g.cart : null);
-    return p ? absURL(p) : null;
+    return p ? verURL(absURL(p), g) : null;
   }
   function setLabel(g) { if (labelEl) labelEl.innerHTML = g ? "<b>" + esc(g.name || g.id) + "</b>" : "<b>LAZY</b>-100"; }
   function focusCanvas() { try { if (canvas) canvas.focus(); } catch (e) {} }
@@ -130,7 +134,7 @@
   function withCart(g, fn) {
     if (!window.lzReady) { log("still booting — try again in a moment", "w"); return; }
     setLabel(g);
-    fetch(absURL(g.cart)).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+    fetch(verURL(absURL(g.cart), g)).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
       .then(function (buf) {
         var f = window.Module.FS || window.FS;
         var path = "/carts/" + basename(g.cart);
@@ -504,7 +508,9 @@
 
   /* Catalog: home needs the rail, carts needs the grid; console can skip it. */
   if (PAGE !== "console") {
-    fetch(CATALOG_BASE + "games.json").then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    // Timestamp query: the catalog list itself must never be stale (a fresh merge should show
+    // up on the next reload, not after the raw CDN's ~5-minute max-age).
+    fetch(CATALOG_BASE + "games.json?ts=" + Date.now()).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(function (j) {
         games = (j && j.games) || [];
         catalogReady = true;
