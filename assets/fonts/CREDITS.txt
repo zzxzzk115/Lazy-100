@@ -1,9 +1,10 @@
-Built-in font: Fusion Pixel Font (缝合像素字体), 10px monospaced, zh_hans variant.
+Built-in font: Fusion Pixel Font (缝合像素字体), 8px monospaced, zh_hans variant.
 Author:  TakWolf and contributors
 Source:  https://github.com/TakWolf/fusion-pixel-font
 Release: 2026.07.01
 License: SIL Open Font License 1.1 -- see fusion-pixel-OFL.txt
 
-Used as Lazy-100's built-in font; linked into the binary (embed/lazy100.rc on
+Used as Lazy-100's built-in CJK font; linked into the binary (embed/lazy100.rc on
 Windows, embed/lazy100.S elsewhere) and rasterized at runtime with stb_truetype
-at its native 10px size. Monospaced so code and the tracker align in columns.
+at its native 8px size. Monospaced so code and the tracker align in columns.
+Latin/ASCII glyphs come from the built-in bitmap font adapted from TIC-80 (MIT).
