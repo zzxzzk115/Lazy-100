@@ -31,3 +31,6 @@ saves/
 
 # Extra P8 carts
 carts/bbs/
+
+# Scratch cart generators (not part of the product)
+scripts/lazybird/
