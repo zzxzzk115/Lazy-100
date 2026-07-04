@@ -87,6 +87,7 @@
     if (n < 1) { if (narrow) n = 1; else { document.body.classList.add("too-small"); return; } }
     n = Math.min(MAX_SCALE, n);
     var bw = BASE_W * n, bh = BASE_H * n; // backing store == CSS size (crisp integer render)
+    fitBW = bw; fitBH = bh; // remembered so watchFit() can detect SDL clobbering the canvas
     // Resize THROUGH SDL once the console is up: setting canvas.width directly leaves SDL
     // believing the old window size, and the present letterboxes into that stale region —
     // a spurious black frame inside the bezel. Pre-boot, set the attributes as a fallback.
@@ -98,6 +99,20 @@
     }
     canvas.style.width = bw + "px";
     canvas.style.height = bh + "px";
+  }
+  var fitBW = 0, fitBH = 0;
+  // First-load race: the pre-boot fit runs before the console exists (lazy100_resize no-ops), then
+  // SDL's window creation clobbers the canvas to ITS default size — and nothing re-fits until a
+  // window resize. Watch for the mismatch and re-fit; once the through-SDL resize lands, the
+  // backing agrees and this stops re-fitting. SDL also writes its own CSS size (size/dpr) after a
+  // resize, so the CSS is re-asserted here directly — cheap, and no ccall tug-of-war.
+  function watchFit() {
+    if (!canvas || !fitBW) return;
+    if (canvas.width !== fitBW || canvas.height !== fitBH) { scheduleFit(); return; }
+    if (canvas.style.width !== fitBW + "px") {
+      canvas.style.width = fitBW + "px";
+      canvas.style.height = fitBH + "px";
+    }
   }
   var fitPending = false;
   function scheduleFit() { if (fitPending) return; fitPending = true; requestAnimationFrame(function () { fitPending = false; fitConsole(); }); }
@@ -276,7 +291,9 @@
     var SENS = 1.4;
     function scale() { var r = canvas.getBoundingClientRect(); return r.width > 0 ? (BASE_W / r.width) * SENS : SENS; }
     canvas.addEventListener("pointerdown", function (e) {
-      if (ctrlMode !== "tool") return; // only a trackpad in shell/editor/explore
+      // Trackpad emulation is for TOUCH input only: a real mouse (or pen) keeps native console
+      // mouse behaviour on desktop — hover, direct clicks, no relative-cursor hijack.
+      if (ctrlMode !== "tool" || e.pointerType !== "touch") return;
       e.preventDefault();
       active = true; moved = false; dragging = false; downT = Date.now();
       lastX = startX = e.clientX; lastY = startY = e.clientY;
@@ -310,8 +327,13 @@
     if (mode === ctrlMode) return;
     ctrlMode = mode;
     document.body.dataset.ctrl = mode;
-    if (mode === "pad") { sendMouse(-1); }        // release the injected mouse
-    else { mfbX = BASE_W / 2; mfbY = BASE_H / 2; sendMouse(0); } // park cursor at centre
+    // The injected (virtual) mouse only exists on touch devices; a desktop mouse must stay the
+    // real SDL pointer — activating the injection there would freeze/hijack it.
+    var coarse = window.matchMedia && window.matchMedia("(pointer:coarse)").matches;
+    if (coarse) {
+      if (mode === "pad") { sendMouse(-1); }        // release the injected mouse
+      else { mfbX = BASE_W / 2; mfbY = BASE_H / 2; sendMouse(0); } // park cursor at centre
+    }
     scheduleFit(); // the keyboard reserves more height than the gamepad, so re-fit the console
   }
   function pollMode() {
@@ -439,7 +461,7 @@
     setupInsert();
     setupPlayhint();
     setupAudioResume();
-    setInterval(pollMode, 200);
+    setInterval(function () { pollMode(); watchFit(); }, 200);
   }
 
   /* Catalog: home needs the rail, carts needs the grid; console can skip it. */
