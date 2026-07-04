@@ -19,7 +19,7 @@ GLES / WebGL)。
 
 | 职责 | 选型 | xmake 包 | 说明 |
 |------|------|----------|------|
-| 渲染 | **VRI** | `vri` | 跨后端 RHI;自身不开窗,只接收原生句柄 |
+| 渲染 | **VRI** | `vri` | 跨后端 RHI;Lazy-100 只启用 GL 后端(OpenGL / GLES / WebGL)。自身不开窗,只接收原生句柄 |
 | 窗口 + 输入 | **SDL3** | `libsdl3` | `<vri/integration/vri_sdl3.h>` 提供 `vriWindowHandleFromSDL3()` |
 | 音频 | **miniaudio** | `miniaudio` | 头文件库;`MINIAUDIO_IMPLEMENTATION` 只在 audio.cpp 一个编译单元 |
 | 脚本绑定 | **sol2** | `sol2` | C++ ↔ Lua 绑定层(原生卡带) |

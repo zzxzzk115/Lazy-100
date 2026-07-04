@@ -1,5 +1,5 @@
 -- Third-party dependencies for Lazy-100.
---   vri:       cross-API RHI (Vulkan backend by default); window handle via the SDL3 integration header
+--   vri:       cross-API RHI (built GL-only here: OpenGL / GLES / WebGL); window handle via the SDL3 integration header
 --   libsdl3:   window creation + keyboard/gamepad input
 --   miniaudio: audio output (header-only)
 --   lua 5.4:   script runtime

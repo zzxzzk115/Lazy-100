@@ -20,7 +20,7 @@ the cart-facing API lives in [CHEATSHEET.md](CHEATSHEET.md).
 
 | Responsibility | Choice | xmake package | Notes |
 |------|------|----------|------|
-| Rendering | **VRI** | `vri` | Cross-backend RHI; creates no window itself, only receives a native handle |
+| Rendering | **VRI** | `vri` | Cross-backend RHI; Lazy-100 builds it GL-only (OpenGL / GLES / WebGL). Creates no window itself, only receives a native handle |
 | Windowing + input | **SDL3** | `libsdl3` | `<vri/integration/vri_sdl3.h>` provides `vriWindowHandleFromSDL3()` |
 | Audio | **miniaudio** | `miniaudio` | Header-only; `MINIAUDIO_IMPLEMENTATION` in exactly one TU (audio.cpp) |
 | Script binding | **sol2** | `sol2` | C++ ↔ Lua binding layer (native carts) |

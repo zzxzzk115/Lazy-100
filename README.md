@@ -37,7 +37,7 @@ writes a `.lz100`; `save mygame.png` mints the cartridge PNG with your title/aut
 
 ## Stack
 
-- **VRI** — rendering (Vulkan backend by default)
+- **VRI** — rendering (GL family: OpenGL on desktop, OpenGL ES / WebGL on the web)
 - **SDL3** — window + keyboard/gamepad input
 - **miniaudio** — audio output
 - **Lua 5.4 + sol2** — cart scripting (+ vendored **z8lua** for p8 carts)
