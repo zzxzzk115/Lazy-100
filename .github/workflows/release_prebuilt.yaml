@@ -1,0 +1,112 @@
+name: Release Prebuilt
+
+# Package the console host (lazy100) + host tools (cartshot, cartwav) for each desktop
+# platform and attach the zips to the GitHub release. Publish a release (or dispatch with
+# a tag) to run it — same flow as vshadersystem's release_prebuilt.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-prebuilt:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            plat: windows
+            arch: x64
+            artifact_suffix: windows-x64
+          - os: ubuntu-latest
+            plat: linux
+            arch: x86_64
+            artifact_suffix: linux-x86_64
+          - os: macos-latest
+            plat: macosx
+            arch: arm64
+            artifact_suffix: macosx-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          submodules: recursive
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+          actions-cache-folder: ".xmake-cache"
+          build-cache: true
+
+      - name: Install Linux Dependencies
+        if: ${{ matrix.plat == 'linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev libdecor-0-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libdrm-dev libgbm-dev
+
+      - name: Configure
+        run: xmake f -m release -p ${{ matrix.plat }} -a ${{ matrix.arch }} --lazy100_build_tests=n --policies=build.ccache:y -y
+
+      - name: Build console + tools
+        run: |
+          git config --global pull.rebase false
+          xmake repo -u
+          xmake build -y lazy100 cartshot cartwav
+
+      - name: Package Bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.release.tag_name || inputs.tag }}"
+          NAME="lazy100-${VERSION}-${{ matrix.artifact_suffix }}"
+          STAGE="prebuilt/${NAME}"
+          OUT="build/${{ matrix.plat }}/${{ matrix.arch }}/release"
+          mkdir -p "${STAGE}"
+
+          EXE=""; [ "${{ matrix.plat }}" = "windows" ] && EXE=".exe"
+          cp "${OUT}/lazy100${EXE}"  "${STAGE}/"
+          cp "${OUT}/cartshot${EXE}" "${STAGE}/"
+          cp "${OUT}/cartwav${EXE}"  "${STAGE}/"
+          cp LICENSE "${STAGE}/LICENSE"
+          cp README.md "${STAGE}/README.md"
+          cp -R docs "${STAGE}/docs"
+
+          cmake -E tar cfv "prebuilt/${NAME}.zip" --format=zip "${STAGE}"
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-${{ matrix.artifact_suffix }}
+          path: prebuilt/*.zip
+
+  upload-release-assets:
+    needs: build-prebuilt
+    if: ${{ !cancelled() }} # publish whatever platforms succeeded
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download All Zips
+        uses: actions/download-artifact@v4
+        with:
+          path: prebuilt_assets
+
+      - name: Publish Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
+          files: prebuilt_assets/**/*.zip
