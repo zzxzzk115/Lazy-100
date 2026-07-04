@@ -87,8 +87,15 @@
     if (n < 1) { if (narrow) n = 1; else { document.body.classList.add("too-small"); return; } }
     n = Math.min(MAX_SCALE, n);
     var bw = BASE_W * n, bh = BASE_H * n; // backing store == CSS size (crisp integer render)
-    if (canvas.width !== bw) canvas.width = bw;
-    if (canvas.height !== bh) canvas.height = bh;
+    // Resize THROUGH SDL once the console is up: setting canvas.width directly leaves SDL
+    // believing the old window size, and the present letterboxes into that stale region —
+    // a spurious black frame inside the bezel. Pre-boot, set the attributes as a fallback.
+    if (window.lzReady && window.Module) {
+      try { window.Module.ccall("lazy100_resize", null, ["number", "number"], [bw, bh]); } catch (e) {}
+    } else {
+      if (canvas.width !== bw) canvas.width = bw;
+      if (canvas.height !== bh) canvas.height = bh;
+    }
     canvas.style.width = bw + "px";
     canvas.style.height = bh + "px";
   }

@@ -41,6 +41,12 @@ namespace lazy100
         // Size of the drawable in pixels (0 while minimized).
         void drawable_size(u32& width, u32& height) const;
 
+        // Resize the window (web: the canvas) through SDL, so SDL's window size and the canvas
+        // backing store stay in agreement. The site's fitConsole drives this — resizing the canvas
+        // from JS directly would leave SDL believing the old size and the present letterboxing
+        // into a smaller region of the backing store (a spurious black frame).
+        void set_size(u32 width, u32 height);
+
         const RawInput& raw_input() const { return raw_; }
 
         SDL_Window* handle() const { return window_; }

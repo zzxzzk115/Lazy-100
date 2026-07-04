@@ -68,6 +68,9 @@ namespace lazy100
         // would), which also pauses the music. No-op unless a cart is running menu-less, so it
         // never toggles an already-open menu closed.
         void        pause_from_web();
+        // Web: resize the canvas THROUGH SDL so its window size and the backing store agree
+        // (JS resizing the canvas directly leaves the present letterboxed in stale bounds).
+        void        resize_display(u32 w, u32 h) { window_.set_size(w, h); }
         void        quit() { running_ = false; } // exit the main loop
 
         double frame_dt() const { return dt_; } // seconds elapsed last frame (for UI timing)

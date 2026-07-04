@@ -70,6 +70,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE void lazy100_set_kiosk(int on)
         g_console->set_kiosk(on != 0);
 }
 
+// Resize the console canvas through SDL. fitConsole must NOT set canvas.width/height itself:
+// SDL would keep reporting the old window size and the present would letterbox into a stale
+// region of the backing store, leaving a spurious black frame around the picture.
+extern "C" EMSCRIPTEN_KEEPALIVE void lazy100_resize(int w, int h)
+{
+    if (g_console && w > 0 && h > 0)
+        g_console->resize_display(static_cast<unsigned>(w), static_cast<unsigned>(h));
+}
+
 // Auto-pause when the tab goes to background: opens the cart pause menu (as ESC would), which
 // also pauses the music. Safe to call any time — no-op unless a cart is running menu-less.
 extern "C" EMSCRIPTEN_KEEPALIVE void lazy100_pause()

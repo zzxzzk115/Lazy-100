@@ -93,6 +93,12 @@ namespace lazy100
         }
     }
 
+    void Window::set_size(u32 width, u32 height)
+    {
+        if (window_ && width > 0 && height > 0)
+            SDL_SetWindowSize(window_, static_cast<int>(width), static_cast<int>(height));
+    }
+
     void Window::drawable_size(u32& width, u32& height) const
     {
         int w = 0, h = 0;
