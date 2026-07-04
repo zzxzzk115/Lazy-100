@@ -253,6 +253,9 @@ namespace lazy100
         bool        running_   = true;
         bool        kiosk_     = false; // web home: hide developer pause-menu items (edit/explore/shell)
         std::string last_error_;        // last cart script error, shown by the code editor
+        bool        error_halt_ = false; // Running hit a script error: freeze on the error screen
+
+        void draw_error_screen(); // love2d-style: blue screen, white message, "ESC to edit"
 
         double      boot_warm_t_ = 0.0;                 // seconds elapsed in the audio warm-up hold
         double      boot_t_      = 0.0;                 // seconds elapsed in the power-on splash

@@ -469,6 +469,7 @@ namespace lazy100
         if (lang_p8_ ? p8_raw_code_.empty() : code_.empty())
             return false;
         clear_last_error(); // a fresh run starts clean; a failed load below re-sets it
+        error_halt_ = false;
         if (lang_p8_)
         {
             if (!p8vm_.load_source(p8_raw_code_)) // z8lua runs the dialect directly
@@ -517,6 +518,56 @@ namespace lazy100
                                           : std::vector<std::string> {
                                                 "continue", "reset cart", "edit", "explore", "shell"}));
         audio_.pause_music(true);
+    }
+
+    // love2d-style crash screen: everything rendered so far is wiped for a blue background with
+    // the white core error message and a hint back to the editor. Drawn every frame while halted.
+    void Console::draw_error_screen()
+    {
+        set_camera(0, 0);
+        framebuffer_.clip_reset();
+        framebuffer_.fillp_reset();
+        const int W  = static_cast<int>(kScreenW);
+        const int H  = static_cast<int>(kScreenH);
+        const int lh = font::line_height();
+        framebuffer_.rectfill(0, 0, W - 1, H - 1, 12); // the classic blue
+        int y = 16;
+        font::print(framebuffer_, "cart error", 12, y, 7);
+        y += lh * 2;
+
+        // Core message: first line only, Lua's chunk prefix trimmed to "line N: ...".
+        std::string msg = last_error_;
+        if (const size_t nl = msg.find('\n'); nl != std::string::npos)
+            msg = msg.substr(0, nl);
+        if (const size_t p = msg.find("]:");
+            p != std::string::npos && p + 2 < msg.size() && msg[p + 2] >= '0' && msg[p + 2] <= '9')
+            msg = "line " + msg.substr(p + 2);
+
+        // Greedy word-wrap into the safe width.
+        const int   maxW = W - 24;
+        std::string line;
+        size_t      i = 0;
+        while (i <= msg.size() && y < H - lh * 3)
+        {
+            const size_t      sp   = msg.find(' ', i);
+            const std::string word = msg.substr(i, (sp == std::string::npos ? msg.size() : sp) - i);
+            const std::string trial = line.empty() ? word : line + " " + word;
+            if (!line.empty() && font::text_width(trial.c_str()) > maxW)
+            {
+                font::print(framebuffer_, line.c_str(), 12, y, 7);
+                y += lh + 2;
+                line = word;
+            }
+            else
+                line = trial;
+            if (sp == std::string::npos)
+                break;
+            i = sp + 1;
+        }
+        if (!line.empty() && y < H - lh * 2)
+            font::print(framebuffer_, line.c_str(), 12, y, 7);
+
+        font::print(framebuffer_, "press ESC to edit and fix it", 12, H - lh - 12, 1);
     }
 
     bool Console::arm_cart(const std::string& path)
@@ -573,7 +624,8 @@ namespace lazy100
     // Every other case presents the live framebuffer untouched (no per-frame copy).
     Framebuffer& Console::present_framebuffer()
     {
-        if (!(lang_p8_ && mode_ == ConsoleMode::Running && screen_pal_active_))
+        // The error screen must keep true palette colors — skip the cart's screen-palette bake.
+        if (!(lang_p8_ && mode_ == ConsoleMode::Running && screen_pal_active_) || !last_error_.empty())
             return framebuffer_;
 
         present_fb_       = framebuffer_; // pixels + clip state; we bake straight into the raw buffer
@@ -842,6 +894,23 @@ namespace lazy100
                 if (load_pending())
                 {
                     process_pending_load();
+                    break;
+                }
+                // A script error halts the cart on a love2d-style error screen (blue background,
+                // white message) instead of erroring on every frame, until the user jumps to the
+                // code editor to fix it (which shows the same error inline).
+                if (!last_error_.empty())
+                {
+                    if (!error_halt_) // entering the error state: silence the crashed cart once
+                    {
+                        error_halt_ = true;
+                        pause_menu_.close();
+                        audio_.stop_music();
+                        audio_.stop_sfx(-1);
+                    }
+                    draw_error_screen();
+                    if (keyboard_.pressed(Keyboard::Escape))
+                        mode_ = ConsoleMode::Editor;
                     break;
                 }
                 // ESC pauses the cart (music included) under a popup menu instead of leaving
