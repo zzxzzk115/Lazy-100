@@ -63,8 +63,7 @@ Host tools: `xmake build cartshot` (headless cart screenshot → PNG) and
 ## Docs
 
 [docs/DESIGN.md](docs/DESIGN.md) for the architecture, [docs/CHEATSHEET.md](docs/CHEATSHEET.md)
-for the API, [docs/TODO.md](docs/TODO.md) for the milestone plan.
-中文文档见 [docs/zh_CN/](docs/zh_CN/).
+for the API. 中文文档见 [docs/zh_CN/](docs/zh_CN/).
 
 ## Credits
 

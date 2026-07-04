@@ -1,10 +1,18 @@
-# Lazy-100 Design Document (Runtime Kernel / MVP v1)
+# Lazy-100 Design Document
 
 > 中文版见 [zh_CN/DESIGN.md](zh_CN/DESIGN.md)。
 
-Lazy-100 is a **fantasy console**, in the spirit of PICO-8 / TIC-80 / basic8, but with a resolution fixed at **320×240** (128×128 is too small to read text), scripted in **Lua 5.4**. It **stands on the shoulders of VRI** — VRI (`../VRI`) is a cross-backend RHI (Render Hardware Interface, abstracting Vulkan / D3D12 / WebGPU / GL).
+Lazy-100 is a **fantasy console** in the spirit of PICO-8 / TIC-80 / basic8, with a resolution
+fixed at **320×240** (readable text), a 256-color palette, 4-channel chip audio, and carts
+scripted in **Lua 5.4**. It **stands on the shoulders of VRI** (`../VRI`), a cross-backend RHI
+(Vulkan / D3D12 / Metal / WebGPU / GL / GLES / WebGL).
 
-This document describes the architecture of the **runtime kernel**. The in-console editor suite (shell, code / sprite / map / sfx / music editors) and the `.lz100` cart format are built on top of this kernel — see [TODO.md](TODO.md) (milestones M6–M11) for that layer.
+The console is complete and self-hosting: everything — shell, code / sprite / map / sfx /
+music-tracker editors, the online cart browser — runs inside the console itself, on desktop
+(Windows / Linux / macOS) and on the web (Emscripten,
+[zzxzzk115.github.io/Lazy-100](https://zzxzzk115.github.io/Lazy-100/)). It also runs p8 carts
+natively through a vendored fixed-point **z8lua** VM. This document describes the architecture;
+the cart-facing API lives in [CHEATSHEET.md](CHEATSHEET.md).
 
 ---
 
@@ -14,300 +22,155 @@ This document describes the architecture of the **runtime kernel**. The in-conso
 |------|------|----------|------|
 | Rendering | **VRI** | `vri` | Cross-backend RHI; creates no window itself, only receives a native handle |
 | Windowing + input | **SDL3** | `libsdl3` | `<vri/integration/vri_sdl3.h>` provides `vriWindowHandleFromSDL3()` |
-| Audio | **miniaudio** | `miniaudio` | Header-only; `MINIAUDIO_IMPLEMENTATION` in exactly one TU |
-| Script binding | **sol2** | `sol2` | C++ ↔ Lua binding layer |
-| Script runtime | **Lua 5.4** | `lua` | Standard, portable (including future WASM/Web targets) |
+| Audio | **miniaudio** | `miniaudio` | Header-only; `MINIAUDIO_IMPLEMENTATION` in exactly one TU (audio.cpp) |
+| Script binding | **sol2** | `sol2` | C++ ↔ Lua binding layer (native carts) |
+| Script runtime | **Lua 5.4** | `lua` | Native carts; portable incl. the WASM target |
+| p8 runtime | **z8lua** (vendored) | — | Fixed-point Lua fork with the p8 dialect; `external/z8lua` |
 
-> The user's initial idea was "VRI + miniaudio + sol2". Filling the gaps: sol2 is only a binding layer and needs **lua** itself; VRI neither opens a window nor handles input, so **SDL3** is needed to provide the window handle and keyboard/gamepad input.
-
-All 5 packages above are already available in the custom repo `https://github.com/zzxzzk115/xmake-repo.git` — VRI included, so it is consumed as a plain `add_requires("vri")` like any other dependency.
+All external packages come from the custom repo `https://github.com/zzxzzk115/xmake-repo.git`,
+so VRI is consumed as a plain `add_requires("vri")` like any other dependency.
 
 ---
 
 ## 2. Module Layout
 
-Layering principle: **video (pure CPU pixels) → gpu (the only thing coupled to VRI) → console (owns the loop) → script (the only thing coupled to sol2)**.
-`video/` depends on neither SDL/VRI/Lua, so it can be unit-tested headless and dump BMPs; `present.cpp` is the only file that touches VRI, making it easy to swap backends later or add an SDL_Renderer fallback.
+Layering principle: **video (pure CPU pixels) → gpu (the only thing coupled to VRI) → console
+(owns the loop) → script (the only thing coupled to a VM)**. `video/` depends on neither
+SDL/VRI/Lua, so headless tools (`cartshot`, `cartwav`) and tests link it directly.
 
 ```
 source/lazy100/
-  common/
-    types.hpp        Fixed-width aliases, Color32, Rect, small math, LZ_ASSERT
-    log.hpp          Logging; also the sink for VRI's MessageCallback
-  video/             —— Deterministic, headless-unit-testable; no SDL/VRI/Lua deps
-    palette.*        256-entry RGBA8 palette (32 curated + color-cube default), set/get/reset
-    framebuffer.*    320×240 uint8 index buffer + clip rect + camera offset
-    draw.*           cls/pset/pget/line/rect/rectfill/circ/circfill/clip
-    font.*           1bpp bitmap glyph table (ASCII 32..126), print() rasterization
-    sprites.*        Sprite sheet (256×256 indices = 16×16 of 16px sprites), spr()/sspr()
-    blit.hpp         Inline span/pixel helpers (clip + transparent-index handling)
-  gpu/               —— The only layer that touches VRI
-    present.*        VRI device+swapchain owner; uploads index texture + full-screen palette resolve
-    shaders/
-      present.slang  Full-screen-triangle VS + palette-resolve PS
-      present_spv.h  Generated: g_presentSpv (Vulkan / GL via SPIRV-Cross)
-      present_dxbc.h Generated (D3D12, Windows host)
-      present_wgsl.h Generated (optional in v1)
-  audio/
-    audio.*          The only definition of MINIAUDIO_IMPLEMENTATION; mixer + sfx() lock-free queue
-  script/            —— The only layer that #includes <sol/sol.hpp>
-    lua_api.*        sol2 binds draw/input/audio onto Console&
-    lua_runtime.*    Owns sol::state; loads cart; resolves/calls _init/_update/_draw
-  cart/
-    cart.*           Loads .lua (v1 = pure script; embedded sheet/palette deferred)
-  input/
-    input.*          6-button virtual gamepad; btn/btnp bitmasks; SDL3 keymap; per-step edges
-  console/
-    console.*        Orchestrator: owns Window/Present/Framebuffer/Sprites/Input/Audio/Lua
-    window.*         SDL3 window create/destroy, event pump, vriWindowHandleFromSDL3()
-    config.hpp       LZ_W=320, LZ_H=240, target fps, palette size, sprite-sheet size
+  common/          types, logging, letterbox layout math
+  video/           palette, 320×240 index framebuffer, draw ops, font (TIC-80 latin bitmap +
+                   Fusion Pixel 8px CJK via stb_truetype), sprites, pixel cursor, icons
+  gpu/             present.* — the only VRI code: index texture upload + palette resolve
+  audio/           4-channel synth: sfx patterns + song sequencer, speaker warm-up,
+                   web background device suspend/rebuild; offline WAV render
+  script/          lua_runtime.* (sol2, native carts) · p8_vm.* (z8lua, p8 carts) ·
+                   lua_api.* (shared C++ API surface) — dual-VM routing per cart language
+  cart/            .lz100 text format (code+gfx+flags+map+sfx+music+label+title/author),
+                   cartpng.* — shareable .lz100.png cartridge (payload in low 2 bits)
+  input/           input.* 6-button pad · keyboard.* full keys · mouse.* — all three accept
+                   web-injected state (touch gamepad / on-screen keyboard / canvas trackpad)
+  world/           128×64 tile map
+  shell/           command line (help/ls/cd/load/save/run/title/author/…)
+  editor/          editor host + code / sprite / map / sfx / music editors, shared ui/icons
+  explore/         online cart browser for the Lazy-100-games catalog
+  net/             fetch (native curl / emscripten_fetch)
+  vfs/             embedded assets (font) + persistent saves (IDBFS on web)
+  console/         orchestrator: mode state machine, boot ceremony, pause menu,
+                   love2d-style error screen, cart lifecycle; window.* (SDL3)
 
-examples/
-  run/main.cpp       argv[1]=cart path; Console c; c.Boot(); c.Run();
-  carts/             hello.lua, bounce.lua ...
-tests/               Optional v1: host-only unit tests for video/ (no GPU)
-external/xmake.lua   VRI dependency wiring
+source/lazy100-app/  host binary + the wasm C exports the web site drives
+tools/               cartshot (headless first-frame PNG) · cartwav (headless music WAV)
+web/site/            the two-page site (home = full console, carts = catalog grid)
+external/z8lua/      vendored fixed-point Lua for p8 carts
 ```
 
 ---
 
-## 3. Frame Loop (Fixed Timestep)
+## 3. Console Modes & Frame Loop
 
-The Console owns the main loop. Logic uses a fixed-step accumulator; rendering follows vsync.
+The console is a mode state machine driven by a fixed-timestep loop (logic 30 Hz, or 60 Hz if
+the cart defines `_update60`; present follows vsync):
 
-```text
-Console::Run():
-  lua.call_init()                      # cart _init() called once
-  prev = clock::now(); acc = 0
-  STEP = 1.0 / target_fps              # default 1/30; 1/60 if the cart defines _update60
-  while running:
-      now = clock::now()
-      frame_dt = min(now - prev, 0.25) # guard against the spiral of death
-      prev = now; acc += frame_dt
-      window.pump_events(running)      # SDL_PollEvent; snapshot raw key state into Input
-      while acc >= STEP:               # fixed-step update, 0..N times
-          input.begin_step()           # pressed = held & ~prev_held
-          lua.call_update()            # game logic + btn/btnp reads
-          input.end_step()             # prev_held = held
-          acc -= STEP
-      lua.call_draw()                  # cart writes the Framebuffer via the draw API
-      present.submit_frame(framebuffer, palette)
 ```
+Boot ──splash──▶ Shell ◀──ESC──▶ Editor ◀─┐
+                  │  ▲                    │ pause menu
+                  ▼  │                    │ (continue / reset / edit / explore / shell)
+               Explore ────▶ Running ◀────┘
+```
+
+- **Boot**: power-on splash + audio warm-up; on the web it doubles as the press-any-key
+  gate that unlocks the AudioContext (a cart can be *armed* to start from the gate gesture).
+- **Running**: fixed-step `_update`/`_update60` + `_draw`; ESC opens the pause menu. A script
+  error halts the cart on a blue error screen (core message + "press ESC to edit and fix it");
+  the code editor shows the same error in an inline bar until the next clean run.
+- **Editor**: tabbed suite (code/sprite/map/sfx/music), Ctrl+Tab cycles.
+- Cart language is detected at load: `.lz100`/`.lua` → sol2 + Lua 5.4; p8 carts → z8lua with
+  the real fixed-point dialect (no transpilation).
 
 ---
 
-## 4. present.submit_frame — VRI Sequence
+## 4. Present: R8_UINT Index Texture + Palette Resolve
 
-Aligned with `VRI/examples/common/example_app.h`: acquire → barrier → upload → full-screen draw → present → fence-wait.
+The CPU framebuffer is `uint8[320*240]`. Each frame it is memcpy'd into a staging ring and
+uploaded as an `R8_UINT` texture; a full-screen-triangle fragment shader resolves color through
+a 256-entry palette constant buffer (updated only when dirty). Integer textures are fetched
+with `.Load` — no filtering, which pairs exactly with integer-scaled nearest-neighbor output
+into a centered letterbox (black bars cleared by the render pass).
 
-```text
-present.submit_frame(fb, pal):
-  if pal.dirty: map paletteBuf; memcpy 256×RGBA8; unmap; dirty=false
-  memcpy(MapBuffer(stagingRing[frame%N]), fb.pixels(), 320*240); UnmapBuffer
+Why not expand to RGBA on the CPU: 4× upload bandwidth, and palette effects (`pal()` swaps,
+fades, cycling) would rewrite 76800 pixels instead of 256 uniform entries.
 
-  AcquireNextTexture(swapchain, &index)        # handle OutOfDate → swap.Resize and skip
-  bbView = CreateTextureView(backbuffers[index])
+The swapchain tracks the window (`drawable_size`) every frame and resizes itself; on the web
+the canvas must be resized **through SDL** (`lazy100_resize` → `SDL_SetWindowSize`) so SDL,
+the canvas backing store and the letterbox math never disagree.
 
-  BeginCommandBuffer(cmd)
-    CmdBarrier(indexTex: * -> CopyDestination)
-    CmdUploadBufferToTexture(indexTex <- staging)   # tightly packed 320×240 R8; VRI handles row pitch
-    CmdBarrier(indexTex: CopyDestination -> ShaderResource @ FragmentShader)
-    CmdBarrier(backbuffer: Undefined -> ColorAttachment)
-    CmdBeginRendering({color=bbView, loadOp=Clear(black bars)})
-      CmdSetViewports(integer-scaled letterbox rect); CmdSetScissors(full window)
-      CmdSetPipelineLayout(presentLayout); CmdSetPipeline(presentPipeline)
-      CmdSetDescriptorSet(0, {indexTex SRV, palette CBV, NEAREST sampler})
-      CmdDraw({vertexNum=3})                          # full-screen triangle, no vertex buffer
-    CmdEndRendering()
-    CmdBarrier(backbuffer: ColorAttachment -> Present)
-  EndCommandBuffer(cmd)
-  QueueSubmit(queue, {cmd, signal fence=++frameValue})
-  Wait(fence, frameValue)                             # v1: simple CPU-GPU sync (see Risk 4)
-  Present(swapchain)
-  DestroyDescriptor(bbView)
-```
-
-Keep an N=image-count staging **ring buffer** to avoid per-frame reallocation.
+Shaders are precompiled offline (Slang → SPIR-V / DXBC / WGSL headers, generated with VRI's
+`vri-shaderc`) and committed, so ordinary builds need no shader toolchain.
 
 ---
 
-## 5. Pixel Format: Upload an R8_UINT Index Texture + Resolve the Palette in the Fragment Shader
+## 5. Cart Formats
 
-**Conclusion: take option (b)** — upload an `R8_UINT` index texture and resolve the color in the fragment shader using a 256-entry palette uniform. Do **not** expand to RGBA8 on the CPU every frame. (`R8_UINT` addresses a full 256 indices, so it caps the palette at exactly 256 with no format change.)
-
-- Index texture: `VriTextureDesc{ 2D, R8_UINT, 320×240, usage=ShaderResource|copy-dst, Device }`. The CPU framebuffer is exactly `uint8_t[320*240]` (75 KB), memcpy'd into HostUpload staging, then `CmdUploadBufferToTexture`.
-- Palette: 256 entries as a **constant buffer** (`uint32 palette[256]` RGBA8 packed, uploaded as `uint4[64]` for tight 16-byte cbuffer stride), bound as a CBV, updated only when `dirty` (usually zero-cost).
-- Fragment shader: `Texture2D<uint>` uses `.Load(int3(p,0))` texelFetch (integer textures cannot be linearly filtered — which pairs perfectly with nearest-neighbor upscaling), and outputs `palette[idx]` as RGBA.
-
-**Rationale (vs option a: CPU-side per-frame index→RGBA8 expansion)**
-- **Bandwidth**: 75 KB/frame vs 300 KB/frame — 4× savings.
-- **Palette effects are nearly free**: `pal()` swaps, palette cycling, fades, screen flashes = changing 256 uniform entries, rather than rewriting 76800 pixels. This is exactly the fantasy-console idiom, and exactly the pain point of option (a).
-- **CPU stays cheap**: the rasterizer always writes just 1 byte/pixel.
-
-**Pitfall handled**: validate `GetFormatSupport(R8_UINT)` at boot; if a backend cannot sample integer textures, fall back to `R8_UNORM` + `round(s*255)`, with the change isolated to `present.slang` + one format constant.
+- **`.lz100`** — a single plain-text file with sections (`__lua__`, `__gfx__`, `__gff__`,
+  `__map__`, `__sfx__`, `__music__`, `__label__`) plus `title` / `author` header lines.
+  Everything the editors produce round-trips through it.
+- **`.lz100.png`** — the shareable cartridge: a rendered cartridge image (header band, 320×240
+  screenshot at a fixed offset, title/author footer) with the RLE-compressed `.lz100` text
+  hidden in the low 2 bits of the RGBA pixels. The image doubles as the catalog preview.
+- **p8 carts** — text and PNG forms load through the same pipeline and route to z8lua.
+  p8 is a compatibility feature; the public catalog carries `.lz100.png` carts only.
 
 ---
 
-## 6. Lua API (v1)
+## 6. Input
 
-Global free functions (PICO-8 convention: a cart calls `pset(...)`, not `lz.pset(...)`). Colors = palette indices `0..255`.
+Three input surfaces, all with a web-injection path (the touch site drives them via C exports):
 
-```text
--- Lifecycle (defined by cart, called by kernel)
-_init()   _update() / _update60()   _draw()
+| Surface | Native source | Web injection |
+|---|---|---|
+| `Input` (6-button pad) | SDL scancodes (arrows + Z/X/C/V) | `lazy100_set_pad` mask |
+| `Keyboard` (editors/shell) | SDL key state + text input | `lazy100_set_keys` mask + `lazy100_type_text` |
+| `Mouse` (editors) | SDL pointer via letterbox transform | `lazy100_set_mouse` (canvas-as-trackpad) |
 
--- Graphics (write the index framebuffer)
-cls([c])  pset(x,y,[c])  pget(x,y)->c
-line(x0,y0,x1,y1,[c])  rect(x0,y0,x1,y1,[c])  rectfill(...)  circ(x,y,r,[c])  circfill(...)
-clip([x,y,w,h])  camera([dx,dy])
-pal([c0,c1])    -- draw-color remap; pal() resets
-palt([c,t])     -- index c transparent (index 0 transparent by default)
-
--- Text
-print(text,[x],[y],[c])->nextx    cursor(x,y,[c])
-
--- Sprites
-spr(n,x,y,[w=1],[h=1],[flip_x],[flip_y])
-sspr(sx,sy,sw,sh,dx,dy,[dw],[dh],[fx],[fy])
-sget(x,y)->c   sset(x,y,[c])   fget/fset (v1 stub: sprite flags)
-
--- Input
-btn([i],[p=0])->bool    -- i ∈ 0..5 (L,R,U,D,O/Z,X); no arg -> bitmask
-btnp([i],[p=0])->bool   -- edge on the step it was pressed, with auto-repeat
-
--- Audio (v1 stub path)
-sfx(n,[chan],[off])     -- routes to audio.trigger_sfx(n)
-music(n)                -- v1 no-op
-
--- Math / utility
-flr ceil abs min max mid sgn sqrt sin cos atan2 rnd srand t
-```
-
-**sol2 bindings** (`lua_api.cpp`, thin trampolines into video/input):
-
-```cpp
-void bind_api(sol::state& L, Console& con) {
-    auto& fb = con.framebuffer(); auto& spr = con.sprites(); auto& in = con.input();
-    L.set_function("cls",  [&fb](sol::optional<int> c){ fb.cls(c.value_or(0)); });
-    L.set_function("pset", [&fb](int x,int y,sol::optional<int> c){ fb.pset(x,y,c); });
-    L.set_function("spr",  [&spr,&fb](int n,int x,int y,sol::optional<int> w,sol::optional<int> h,
-                                      sol::optional<bool> fx,sol::optional<bool> fy){
-        spr.draw(fb,n,x,y,w.value_or(1),h.value_or(1),fx.value_or(false),fy.value_or(false)); });
-    L.set_function("btn",  [&in](sol::optional<int> i,sol::optional<int> p){
-        return i ? in.held(*i,p.value_or(0)) : in.held_mask(p.value_or(0)); });
-}
-```
-
-`lua_runtime.cpp` caches callbacks as `sol::protected_function`; when a cart errors it prints diagnostics and freezes that cart rather than crashing the host:
-
-```cpp
-sol::protected_function cb_update = L["_update"];   // may be nil
-// each step: if (cb_update.valid()) { auto r = cb_update(); if(!r.valid()) report_lua_error(r); }
-```
+Pad edges (`btnp`) are sampled per **logic step** (not per render frame) with the classic
+15/4-frame auto-repeat, so taps behave identically at any refresh rate.
 
 ---
 
-## 7. Fixed Timestep & Input Model
+## 7. Audio
 
-**FPS decision: logic fixed-step defaults to 30 Hz, present follows vsync.** PICO-8 offers both `_update()`@30 and `_update60()`@60. A fixed 30 Hz is the classic feel, halves CPU cost, and makes `btnp` auto-repeat timing behave as expected. If a cart defines `_update60`, STEP=1/60. Decoupling logic from present matters because present is locked to vsync while the display may be 60/120/144 Hz.
+A 4-channel chip synth in the miniaudio render callback: 64 sfx patterns (32 steps × pitch /
+wave / volume / fx) and a 64-row song sequencer; sfx voices mask music voices per-channel and
+the music keeps stepping silently underneath so it resumes in sync. A ~1.5 s sub-audible dither
+warms power-saving speakers after device start.
 
-**Input (`input/input.cpp`)** — six virtual keys, player 0 only in v1:
-- `held_mask`: rebuilt each pump from SDL3 keyboard state (arrow keys + Z/X, configurable keymap), read live by `btn`.
-- `prev_mask`: the held mask at the previous **logic step**.
-- `pressed_mask = held_mask & ~prev_mask` → `btnp`, computed in `begin_step()`, **sampled per logic step, not per render frame**. Crucial: with 60 Hz render + 30 Hz logic, a one-frame tap must fire exactly once, and each of the N catch-up steps within a render frame must see correct press semantics.
-- auto-repeat (PICO-8: after a 15-frame delay, every 4 frames): each key maintains a held-step counter and emits a repeat pulse at the corresponding interval.
-
----
-
-## 8. Shader Processing
-
-VRI consumes **precompiled** bytecode (Slang → SPIR-V/WGSL/DXBC offline; see VRI's `tools/vri-shaderc` and `xmake/tasks/shaders.lua`). Lazy-100 copies this pattern.
-
-**v1 needs only one program**: `present.slang` — a full-screen-triangle VS (generates 3 clip-space vertices from `SV_VertexID`, no vertex buffer) + a palette-resolve PS:
-
-```hlsl
-struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
-[shader("vertex")] VSOut vertexMain(uint vid : SV_VertexID) {
-    float2 uv = float2((vid<<1)&2, vid&2);          // (0,0)(2,0)(0,2)
-    VSOut o; o.uv = uv; o.pos = float4(uv*2-1, 0, 1); return o;
-}
-Texture2D<uint> gIndex : register(t0);              // R8_UINT 320×240
-cbuffer Palette : register(b0) { uint gPal[256]; }; // RGBA8 packed
-[shader("fragment")] float4 fragmentMain(VSOut i) : SV_Target {
-    int2 p = int2(i.uv * float2(320,240));
-    uint c = gPal[ gIndex.Load(int3(p,0)) ];
-    return float4(c&0xff,(c>>8)&0xff,(c>>16)&0xff,255) / 255.0;
-}
-```
-
-Adjust the Y-flip per VRI's standard top-left / Y-up clip convention (VRI normalizes across backends — verify against the triangle example).
-
-**Location/build**: commit `source/lazy100/gpu/shaders/present.slang` together with the generated `present_spv.h` / `_wgsl.h` / `_dxbc.h` (same pattern as VRI's `tests/shaders/*_spv.h`). The kernel `#include`s the header and picks the blob by backend. Add a `task("shaders")` to Lazy-100's xmake that simply invokes VRI's already-built `vri-shaderc` (reuse, don't build another compiler):
-
-```
-vri-shaderc present.slang -o present_spv.h  --var g_presentSpv  --target spirv
-vri-shaderc present.slang -o present_dxbc.h --var g_presentDxbc --target dxbc   (Windows host)
-```
-
-v1 minimum: SPIR-V (Vulkan + desktop GL); add DXBC if v1 includes a D3D12 target. Committing the headers means an ordinary build needs no Slang.
+Web specifics: the device starts inside the first user-gesture stack (AudioContext unlock);
+when the tab backgrounds, the site auto-pauses the cart and **kills the device**
+(`lazy100_audio_suspend`), rebuilding it fresh on return — resuming a backgrounded iOS
+AudioContext is unreliable, a fresh one is not. `cartwav` renders the sequencer headlessly to
+WAV for analysis.
 
 ---
 
-## 9. xmake Wiring
+## 8. Web Site & Exports
 
-**Root `xmake.lua`**: change the template `PROJECT_NAME` token to `lazy100`; keep `add_repositories("my-xmake-repo https://github.com/zzxzzk115/xmake-repo.git backup")`, the mode rules, and the `includes("external"/"source"/"tests"/"examples")` order.
-
-**Dependencies** (root or `external/xmake.lua`):
-```lua
-add_requires("libsdl3")
-add_requires("miniaudio")
-add_requires("lua 5.4")
-add_requires("sol2")        -- header-only, compiled against the lua above
-add_requires("vri")         -- published in the custom xmake-repo; no sibling-repo wiring needed
-```
-
-**`source/xmake.lua`**:
-```lua
-target("lazy100-static")
-    set_kind("static")
-    set_languages("cxx23")
-    add_files("lazy100/**.cpp")
-    add_includedirs("$(scriptdir)", {public = true})
-    add_headerfiles("lazy100/**.hpp")
-    add_packages("libsdl3", "miniaudio", "lua", "sol2", "vri", {public = true})
-target_end()
-```
-
-**`examples/xmake.lua`**:
-```lua
-target("lazy100")
-    set_kind("binary")
-    add_files("run/main.cpp")
-    add_deps("lazy100-static")
-    add_packages("libsdl3")
-    -- after_build copies examples/carts/*.lua next to the binary
-target_end()
-```
-
-Note: the template already sets `/Zc:__cplusplus` + exceptions (required by sol2); debug builds enable VRI validation (`enableValidation = VRI_TRUE`) routed to `common/log` (`VriCallbackInterface`). Backend selection goes through VRI's `VriGraphicsAPI_Auto` + a `VRI_API` env-var override (on Windows the local default is Vulkan, with D3D12 optional).
+`web/site/` is a two-page static site (home = the full console; `/carts/` = catalog grid that
+links back to `/?cart=<id>`), deployed by pushing the `doc` branch (GitHub Actions builds the
+wasm console with `scripts/build_site.sh`). The host app exports the C hooks the site uses:
+cart boot/arm, pad/keyboard/text/mouse injection, mode query (to swap touch control sets),
+canvas resize, background pause, audio suspend/resume/rewarm. Mobile shows a virtual gamepad
+while a cart runs and an on-screen keyboard + canvas trackpad in the shell/editors.
 
 ---
 
-## 10. Risks / Unknowns
+## 9. Build & Tooling
 
-1. **R8_UINT sampling support** — validate at boot with `GetFormatSupport`, keep the `R8_UNORM` fallback; fetch integer-texture values with `.Load`, never filter.
-2. **Y-flip direction** — VRI normalizes top-left across backends; verify early with an asymmetric test sprite, otherwise some backend will be upside-down.
-3. **Per-frame `Wait(fence)`** fully serializes CPU/GPU — fine for 320×240, but no overlap near vsync. If pacing is poor, move to N-deep frames-in-flight + staging/CBV rings. Not a v1 blocker.
-4. **Swapchain resize/minimize** — handle `OutOfDate` on acquire (`swap.Resize`), skip rendering at 0 size.
-5. **sol2 ⇄ Lua 5.4 coupling** — pin both versions; mind MSVC `/Zc:__cplusplus` + exceptions (already set).
-6. **Lua error containment** — `sol::protected_function`; v1 policy: freeze and show the error on-screen vs exit.
-7. **Audio scope creep** — v1 only inits miniaudio + `sfx()` pushing an id onto a lock-free queue, consumed by the audio callback (square-wave beep to validate the path). The queue boundary is the hook for a future synth/tracker. The tracker is not in v1.
-8. **Sprite/palette data source** — v1 carts are pure `.lua` with no embedded sheet binary. Simplest: from Lua `sset()`, or a side-car indexed PNG loaded by `cart.cpp` (the `__gfx__` hex-string format is deferred).
-
----
-
-## 11. References (Read-only)
-
-- `../VRI/examples/common/example_app.h` — the standard VRI boot/present sequence
-- `../VRI/examples/triangle/main.cpp` — minimal pipeline creation + per-backend blob selection
-- `../VRI/include/vri/` — `vri_core.h` / `vri_command.h` / `ext/vri_ext_swapchain.h` / `integration/vri_sdl3.h`
+xmake end to end. `xmake` builds the host; `xmake f -p wasm && xmake build lazy100` the web
+console; `scripts/build_site.sh` assembles the whole site into `build/site/`. Host tools:
+`cartshot` (headless first-frame `.png` / packed `.lz100.png`) and `cartwav`. Tests live under
+`tests/` (`lazy100_build_tests=n` to skip). Windows uses the static CRT (MT) to match VRI.
+CI: `deploy_pages.yaml` (site, on `doc` push) and `release_prebuilt.yaml` (console + tools
+zips per platform, on release publish).
