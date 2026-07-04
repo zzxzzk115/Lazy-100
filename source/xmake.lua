@@ -1,4 +1,4 @@
--- Lazy-100 runtime kernel: a static library every host/example links against.
+-- Lazy-100 runtime kernel: a static library the host app and tools link against.
 target("lazy100-static")
     set_kind("static")
     set_languages("cxx23")
@@ -12,3 +12,6 @@ target("lazy100-static")
         add_packages("libcurl", {public = true}) -- net::Fetch desktop backend
     end
 target_end()
+
+-- The host application: the `lazy100` executable that links the kernel above.
+includes("lazy100-app")

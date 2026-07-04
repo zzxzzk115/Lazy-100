@@ -2,11 +2,11 @@
 target("lazy100")
     set_kind("binary")
     set_languages("cxx23")
-    add_files("run/main.cpp")
+    add_files("main.cpp")
     add_deps("lazy100-static")
 
     -- `xmake run` defaults the working dir to the exe's folder; use the project root so
-    -- relative cart paths (carts/, examples/carts/) resolve for ls/load/save.
+    -- relative cart paths (carts/) resolve for ls/load/save.
     set_rundir("$(projectdir)")
 
     -- Link the built-in assets (font, ...) into the executable so it is self-contained:
@@ -54,7 +54,7 @@ target("lazy100")
         -- The site (web/site) drives the embedded console from JS: it writes a fetched .lz100.png
         -- into MEMFS and ccalls lazy100_boot_cart to play it in place. Keep _main too, since
         -- setting EXPORTED_FUNCTIONS otherwise drops emscripten's default _main export.
-        add_ldflags("-sEXPORTED_FUNCTIONS=['_main','_lazy100_boot_cart']", {force = true})
+        add_ldflags("-sEXPORTED_FUNCTIONS=['_main','_lazy100_boot_cart','_lazy100_arm_cart','_lazy100_set_pad','_lazy100_set_keys','_lazy100_type_text','_lazy100_mode','_lazy100_set_kiosk','_lazy100_set_mouse','_lazy100_pause','_lazy100_warm_audio','_lazy100_audio_suspend','_lazy100_audio_resume']", {force = true})
         -- explore downloads (emscripten_fetch) + persistent storage: /carts and /saves are
         -- IDBFS mounts (IndexedDB), loaded in preRun (see web/shell.html) and flushed after
         -- writes via vfs::persist_flush().

@@ -13,12 +13,6 @@ set_config("root", is_root)
 set_config("project_dir", os.scriptdir())
 
 -- global options
-option("lazy100_build_examples") -- build examples?
-    set_default(true)
-    set_showmenu(true)
-    set_description("Enable lazy100 examples")
-option_end()
-
 option("lazy100_build_tests") -- build tests?
     set_default(true)
     set_showmenu(true)
@@ -68,9 +62,4 @@ includes("tools")
 -- include tests
 if has_config("lazy100_build_tests") then
     includes("tests")
-end
-
--- if build examples, then include examples
-if has_config("lazy100_build_examples") then
-    includes("examples")
 end
