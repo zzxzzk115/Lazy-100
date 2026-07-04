@@ -19,6 +19,10 @@
     try { if (new URL(cartUrlParam).hostname !== "raw.githubusercontent.com") cartUrlParam = null; }
     catch (e) { cartUrlParam = null; }
   }
+  // Sticky flag: cartUrlParam is consumed (nulled) when the fetch STARTS, but armRandom must
+  // stay suppressed for the whole page life — the catalog often finishes loading later and
+  // would otherwise arm a random cart right over the PR preview cart.
+  var urlMode = !!cartUrlParam;
 
   var canvas = document.getElementById("canvas");
   var foot = document.getElementById("foot");
@@ -158,7 +162,7 @@
   // gesture (key, tap, or a virtual gamepad button) is what unlocks/warms the audio.
   var armed = false;
   function armRandom() {
-    if (PAGE !== "home" || cartParam || cartUrlParam || armed || !games.length || !window.lzReady) return;
+    if (PAGE !== "home" || cartParam || urlMode || armed || !games.length || !window.lzReady) return;
     armed = true;
     withCart(games[Math.floor(Math.random() * games.length)], function (path, gg) {
       window.Module.ccall("lazy100_arm_cart", "number", ["string"], [path]);
