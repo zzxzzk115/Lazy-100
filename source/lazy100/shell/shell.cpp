@@ -96,9 +96,22 @@ namespace lazy100
 
         if (cmd == "help")
         {
-            print_line("commands: help ls cd pwd cls run edit load save new explore exit");
-            print_line("save foo.png / load foo.png: cart as a shareable image");
-            print_line("explore: browse & download games from the online catalog");
+            // One "name \t what it does" line per command; draw() renders the '\t' as a fixed
+            // pixel column, since the proportional latin font defeats space alignment.
+            print_line("help\tthis list");
+            print_line("ls\tlist carts and folders");
+            print_line("cd <dir>\tchange folder");
+            print_line("pwd\tprint current folder");
+            print_line("cls\tclear the screen");
+            print_line("new\tstart a blank cart");
+            print_line("load <name>\tload a cart");
+            print_line("save <name>\tsave cart (.png = cartridge image)");
+            print_line("run\trun the loaded cart");
+            print_line("edit\topen the editors");
+            print_line("explore\tbrowse the online catalog");
+            print_line("title <text>\tset the cart title");
+            print_line("author <name>\tset your author name");
+            print_line("exit\tquit the console");
         }
         else if (cmd == "cls")
             lines_.clear();
@@ -397,7 +410,17 @@ namespace lazy100
         int       y     = 4;
         for (int i = start; i < static_cast<int>(lines_.size()); ++i)
         {
-            font::print(fb, lines_[i].c_str(), 4, y, 6);
+            // A '\t' splits the line into two columns (help uses this): the latin font is
+            // proportional, so space-padding can never align — a fixed pixel column can.
+            const std::string& ln  = lines_[i];
+            const size_t       tab = ln.find('\t');
+            if (tab != std::string::npos)
+            {
+                font::print(fb, ln.substr(0, tab).c_str(), 4, y, 6);
+                font::print(fb, ln.substr(tab + 1).c_str(), 100, y, 6);
+            }
+            else
+                font::print(fb, ln.c_str(), 4, y, 6);
             y += lh;
         }
 
