@@ -30,7 +30,7 @@ namespace lazy100
             m |= bit(O);
         if (ks[SDL_SCANCODE_X] || ks[SDL_SCANCODE_V])
             m |= bit(X);
-        held_ = m;
+        held_ = m | touch_; // fold in the web virtual gamepad
     }
 
     void Input::begin_step()

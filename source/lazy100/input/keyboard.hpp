@@ -36,6 +36,12 @@ namespace lazy100
 
         void update(const Window& window, double dt); // call once per render frame; dt = seconds
 
+        // Web virtual controls: OR a Key bitmask (1u<<Key) into the held state, and queue typed
+        // UTF-8 text, so the touch gamepad / on-screen keyboard drive menus, the shell and editors
+        // exactly like a physical keyboard. inject_text accumulates until the next update() consumes it.
+        void inject_keys(u32 mask) { inj_keys_ = mask; }
+        void inject_text(const std::string& s) { inj_text_ += s; }
+
         bool held(Key k) const;
         bool pressed(Key k) const; // clean single-press edge (no auto-repeat) — for toggles
         bool repeat(Key k) const;  // edge + auto-repeat while held — for nav/edit keys
@@ -56,5 +62,7 @@ namespace lazy100
         bool        ctrl_  = false;
         bool        shift_ = false;
         bool        alt_   = false;
+        u32         inj_keys_ = 0; // web virtual-control key bitmask (1u<<Key), OR'd into held_
+        std::string inj_text_;     // web virtual-keyboard typed text, drained each update()
     };
 } // namespace lazy100

@@ -8,6 +8,19 @@ namespace lazy100
 {
     void Mouse::update(const Window& window)
     {
+        if (inj_active_) // web trackpad: position + buttons come from JS, ignore the SDL pointer
+        {
+            x_ = inj_x_;
+            y_ = inj_y_;
+            for (int b = 0; b < Count; ++b)
+            {
+                prev_[b] = down_[b];
+                down_[b] = (inj_buttons_ & (1u << b)) != 0;
+            }
+            wheel_ = 0;
+            return;
+        }
+
         const RawInput& raw = window.raw_input();
 
         u32 ww = 0, wh = 0;

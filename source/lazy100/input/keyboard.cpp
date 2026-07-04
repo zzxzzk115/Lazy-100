@@ -43,7 +43,7 @@ namespace lazy100
         for (int i = 0; i < Count; ++i)
         {
             prev_[i] = held_[i];
-            held_[i] = ks[scancode(static_cast<Key>(i))];
+            held_[i] = ks[scancode(static_cast<Key>(i))] || (inj_keys_ & (1u << i)); // web virtual keys
             if (!held_[i])
             {
                 hold_[i] = acc_[i] = 0.0;
@@ -75,6 +75,11 @@ namespace lazy100
         alt_   = ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_RALT];
 
         text_ = window.raw_input().text;
+        if (!inj_text_.empty()) // web on-screen keyboard: append the injected characters this frame
+        {
+            text_ += inj_text_;
+            inj_text_.clear();
+        }
     }
 
     bool Keyboard::held(Key k) const { return k >= 0 && k < Count && held_[k]; }

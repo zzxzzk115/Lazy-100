@@ -21,6 +21,14 @@ namespace lazy100
 
         void update(const Window& window); // call once per render frame
 
+        // Web virtual mouse (the console screen used as a trackpad): when active, the framebuffer
+        // cursor position and button state come straight from JS instead of the SDL pointer.
+        void inject(int x, int y, u32 buttons, bool active)
+        {
+            inj_active_ = active;
+            inj_x_ = x; inj_y_ = y; inj_buttons_ = buttons;
+        }
+
         int  x() const { return x_; } // framebuffer coords (may fall outside 0..319 / 0..239)
         int  y() const { return y_; }
         bool in_bounds() const;
@@ -35,5 +43,8 @@ namespace lazy100
         bool down_[Count] = {};
         bool prev_[Count] = {};
         int  wheel_       = 0;
+        bool inj_active_  = false; // web virtual mouse (trackpad) drives position/buttons instead of SDL
+        int  inj_x_ = 0, inj_y_ = 0;
+        u32  inj_buttons_ = 0;
     };
 } // namespace lazy100

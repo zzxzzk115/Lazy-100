@@ -25,7 +25,8 @@ namespace lazy100
         void poll();       // refresh held state from the keyboard (once per render frame)
         void begin_step(); // compute pressed edges + auto-repeat (before _update)
         void end_step();   // latch prev = held (after _update)
-        void inject(u32 held) { held_ = held; } // headless/test: set held state without a keyboard
+        void inject(u32 held) { held_ = held; }    // headless/test: set held state without a keyboard
+        void set_touch(u32 mask) { touch_ = mask; } // web: OR a virtual-gamepad mask into poll()
 
         bool held(int button, int player = 0) const;
         bool pressed(int button, int player = 0) const;
@@ -36,6 +37,7 @@ namespace lazy100
         u32 held_    = 0;
         u32 prev_    = 0;
         u32 pressed_ = 0;
+        u32 touch_   = 0; // virtual-gamepad mask (web), OR'd into held state by poll()
         int repeat_[Count] = {}; // consecutive held-steps per button, for auto-repeat
     };
 } // namespace lazy100
