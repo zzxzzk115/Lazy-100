@@ -1,6 +1,6 @@
 # Lazy-100
 
-A **fantasy game console** in the spirit of the classic ones (TIC-80, basic8, …), but a
+A **fantasy game console** in the spirit of PICO-8 / TIC-80 / basic8, but a
 notch more capable: a readable **320×240** screen, a **256-color** palette, **16×16**
 sprites, 4-channel chip audio, a full in-console editor suite, and scripting in
 **Lua 5.4**. It stands on the shoulders of
@@ -9,6 +9,8 @@ sprites, 4-channel chip audio, a full in-console editor suite, and scripting in
 
 **▶ Play it in the browser: <https://zzxzzk115.github.io/Lazy-100/>** — the full console
 (shell + editors included), a browsable cart catalog, and touch controls on phones/tablets.
+
+![Lazy-100 showcase](media/showcase.gif)
 
 ## Specs
 
