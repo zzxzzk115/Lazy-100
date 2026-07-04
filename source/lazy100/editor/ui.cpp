@@ -98,11 +98,30 @@ namespace lazy100::ui
             font::print(fb, lines[i].c_str(), px + 4, py + 2 + static_cast<int>(i) * lh, kText);
     }
 
+    namespace
+    {
+        // A help tooltip is stashed here and drawn by flush_tooltip() AFTER the editor finishes,
+        // so later drawing (note grid, panels) can't cover it.
+        struct PendingTip
+        {
+            bool        active = false;
+            int         x = 0, y = 0;
+            std::string text;
+        } g_tip;
+    } // namespace
+
     void help_button(Framebuffer& fb, Console& con, const Mouse& m, int x, int y, int id, const char* text)
     {
         constexpr int kSz = 12;
         icon_button(fb, m, x, y, kSz, kSz, icon::Help);
         if (con.tooltip_active(id, hit(m, x, y, kSz, kSz)))
-            tooltip(fb, x, y, text);
+            g_tip = {true, x, y, text ? text : ""}; // deferred; flush_tooltip draws it on top
+    }
+
+    void flush_tooltip(Framebuffer& fb)
+    {
+        if (g_tip.active)
+            tooltip(fb, g_tip.x, g_tip.y, g_tip.text.c_str());
+        g_tip.active = false;
     }
 } // namespace lazy100::ui

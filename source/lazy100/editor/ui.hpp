@@ -56,5 +56,9 @@ namespace lazy100
         // tooltip. `id` distinguishes hotspots for the hover timer (unique per editor).
         void help_button(Framebuffer& fb, Console& con, const Mouse& m, int x, int y, int id,
                          const char* text);
+
+        // Draw any tooltip stashed by help_button this frame, on top of everything. Call once at
+        // the end of the editor host's draw so tooltips are never covered by later drawing.
+        void flush_tooltip(Framebuffer& fb);
     } // namespace ui
 } // namespace lazy100

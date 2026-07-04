@@ -78,5 +78,6 @@ namespace lazy100
 
         editors_[current_]->draw(con, fb);
         editors_[current_]->draw_tools(con, fb); // after draw: tool buttons sit above any clear
+        ui::flush_tooltip(fb);                   // tooltips last, so nothing can cover them
     }
 } // namespace lazy100
