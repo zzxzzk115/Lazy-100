@@ -132,10 +132,12 @@ namespace lazy100
         bool deviceRunning = false;
 
         // Start the (suspended) device from within a DOM gesture event; the browser only resumes
-        // the AudioContext when this runs synchronously in a user-gesture stack. One-shot.
+        // the AudioContext when this runs synchronously in a user-gesture stack. Re-arms after a
+        // background device_suspend()/device_resume() cycle (deviceRunning drops back to false).
+        // `started` guards against the window between suspend and resume, when there IS no device.
         static EM_BOOL try_resume(Impl* im)
         {
-            if (im && !im->deviceRunning && ma_device_start(&im->device) == MA_SUCCESS)
+            if (im && im->started && !im->deviceRunning && ma_device_start(&im->device) == MA_SUCCESS)
                 im->deviceRunning = true;
             return EM_FALSE; // don't consume the event
         }
@@ -722,6 +724,55 @@ namespace lazy100
         if (!p_ || channel < 0 || channel >= kChannels)
             return -1;
         return p_->sfxStepPos[channel].load(std::memory_order_relaxed);
+    }
+
+    void Audio::rewarm()
+    {
+        if (p_)
+            p_->warmupFrames.store(static_cast<uint32_t>(p_->sampleRate * 1.5), std::memory_order_relaxed);
+    }
+
+    void Audio::device_suspend()
+    {
+#if defined(__EMSCRIPTEN__)
+        if (!p_ || !p_->started)
+            return;
+        // Kill the device outright: iOS revokes the audio session in the background, and the old
+        // AudioContext is unreliable afterwards (it can claim "running" while producing silence).
+        // Sequencer state (voices, song position, queues) lives in Impl and survives untouched.
+        ma_device_uninit(&p_->device);
+        p_->started       = false;
+        p_->deviceRunning = false;
+        LZ_INFO("audio: device suspended (tab backgrounded)");
+#endif
+    }
+
+    void Audio::device_resume()
+    {
+#if defined(__EMSCRIPTEN__)
+        if (!p_ || p_->started)
+            return; // no Impl, or the device is already up (idempotent)
+        // Rebuild the device from scratch — same config as init()'s web branch. A fresh context
+        // may start suspended if we're not in a gesture stack; the window gesture handlers
+        // (try_resume) and miniaudio's own unlock listeners start it on the next tap.
+        ma_device_config cfg  = ma_device_config_init(ma_device_type_playback);
+        cfg.playback.format   = ma_format_f32;
+        cfg.playback.channels = 2;
+        cfg.sampleRate        = 44100;
+        cfg.dataCallback      = &Impl::render;
+        cfg.pUserData         = p_.get();
+        if (ma_device_init(nullptr, &cfg, &p_->device) != MA_SUCCESS)
+        {
+            LZ_WARN("audio: device re-init failed after background; sound stays off");
+            return;
+        }
+        p_->started    = true;
+        p_->sampleRate = p_->device.sampleRate;
+        p_->warmupFrames.store(static_cast<uint32_t>(p_->sampleRate * 1.5), std::memory_order_relaxed);
+        if (ma_device_start(&p_->device) == MA_SUCCESS)
+            p_->deviceRunning = true;
+        LZ_INFO("audio: device rebuilt (tab foregrounded)%s", p_->deviceRunning ? "" : "; starts on next tap");
+#endif
     }
 
     bool Audio::warming_up() const

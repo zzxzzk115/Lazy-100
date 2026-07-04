@@ -50,6 +50,18 @@ namespace lazy100
         // chime isn't lost. False if audio is disabled. Thread-safe.
         bool warming_up() const;
 
+        // Re-arm the warm-up dither. Web: called when the tab returns to the foreground — the
+        // browser suspended the AudioContext while backgrounded and the speaker may have gone
+        // back to power-saving, which would swallow the first notes after resume. Thread-safe.
+        void rewarm();
+
+        // Web background/foreground cycle: iOS revokes the page's audio session in the background
+        // and resuming the old AudioContext is unreliable (it can even lie about being "running").
+        // So the device is KILLED on hide and REBUILT on return — a fresh context + fresh unlock
+        // listeners, started on the next gesture. Both are no-ops on native builds.
+        void device_suspend();
+        void device_resume();
+
         // Offline render: run the sequencer headlessly (no device needed, works on a fresh
         // Audio) for `seconds` starting at music pattern `index`, writing a 16-bit stereo WAV.
         // Debug/analysis aid - lets seams and clicks be measured instead of argued about.
