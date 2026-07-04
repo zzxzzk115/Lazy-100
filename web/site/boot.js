@@ -23,7 +23,9 @@
   };
 
   var Module = window.Module || {};
-  Module.locateFile = function (p) { return dir + p; };
+  // Version query (stamped at build time) so a new deploy busts the cached lazy100.wasm too —
+  // GitHub Pages serves with max-age=600 and a stale wasm against fresh JS is the worst mismatch.
+  Module.locateFile = function (p) { return dir + p + (window.LZ_BUILD && window.LZ_BUILD.indexOf("__") < 0 ? "?v=" + window.LZ_BUILD : ""); };
   Module.canvas = canvas;
   Module.print = function (t) { window.lzAppendLog(t, "l"); };
   Module.printErr = function (t) { window.lzAppendLog(t, /error|fail|abort/i.test(String(t)) ? "e" : "w"); };

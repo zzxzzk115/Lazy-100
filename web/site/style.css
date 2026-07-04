@@ -197,6 +197,13 @@ body[data-page="console"] .terminal { display:flex; }
 .statusbar { display:flex; align-items:center; gap:10px; padding:8px 18px; font-size:15px; color:var(--muted);
   border-top:var(--px) solid var(--line); background:var(--panel); }
 .statusbar .spacer { flex:1; }
+/* "site updated" bar: appears when version.json advertises a newer deploy; click reloads. */
+#upbar { position:fixed; left:50%; transform:translateX(-50%);
+  bottom:calc(14px + env(safe-area-inset-bottom)); z-index:60; cursor:pointer;
+  font-family:var(--pixel); font-size:9px; text-transform:uppercase; letter-spacing:1px;
+  color:var(--bg-0); background:var(--ok); border:0; padding:12px 16px;
+  box-shadow:0 var(--px) 0 #067a3a, 0 6px 0 #0006; }
+#upbar:active { transform:translate(-50%, var(--px)); }
 .statusbar .copyright { margin-left:16px; padding-left:16px; border-left:var(--px) solid var(--line); }
 .muted { color:var(--muted); }
 

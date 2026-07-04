@@ -469,6 +469,35 @@
     document.addEventListener("pointerdown", function () { if (audioDown) audioResume(); }, true);
   }
 
+  /* ---- deploy update check ----
+     GitHub Pages caches assets with max-age=600, so a user who keeps the tab open (or reopens
+     within 10 min) can run a stale build. Every page embeds its build id (window.LZ_BUILD,
+     stamped by build_site.sh); we poll version.json (cache-busted) and, on mismatch, show a
+     clickable "site updated" bar that reloads with fresh assets (the ?v= queries do the rest). */
+  function setupUpdateCheck() {
+    var build = window.LZ_BUILD;
+    if (!build || build.indexOf("__") >= 0) return; // unstamped local/dev build
+    var root = PAGE === "carts" ? "../" : "";
+    var shown = false;
+    function check() {
+      if (shown || document.hidden) return;
+      fetch(root + "version.json?ts=" + Date.now(), { cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || !j.build || j.build === build || shown) return;
+          shown = true;
+          var bar = document.createElement("button");
+          bar.id = "upbar"; bar.type = "button";
+          bar.textContent = "▸ site updated — tap to refresh";
+          bar.addEventListener("click", function () { location.reload(); });
+          document.body.appendChild(bar);
+        }).catch(function () {});
+    }
+    setInterval(check, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) check(); });
+    setTimeout(check, 30 * 1000); // one early check shortly after load
+  }
+
   /* ---- per-page init ---- */
   function tryStartParam() {
     if (PAGE !== "home" || !cartParam || !catalogReady || !window.lzReady) return;
@@ -495,6 +524,7 @@
   }
 
   setupMobileChrome();
+  setupUpdateCheck();
   if (HAS_CONSOLE) {
     // The full console lives on home now: gamepad for carts, on-screen keyboard + screen-trackpad for
     // the shell/editors. Mode polling swaps the control set. (No kiosk gating — home is not crippled.)
