@@ -491,6 +491,10 @@ namespace lazy100
     {
         if (!load_cart_file(path))
             return false;
+        // Silence the outgoing cart: without this its music/sfx keep playing through the boot splash
+        // and into the new cart until the new cart happens to touch those channels.
+        audio_.stop_music();
+        audio_.stop_sfx(-1);
         // Replay the power-on splash, then start the cart (the Boot case hands off to start_cart
         // when boot_next_ is Running). web_started_ is forced: the JS call already came from a
         // user click, so the audio is unlocked and we skip the "click to start" gate.
@@ -500,6 +504,38 @@ namespace lazy100
         boot_t_      = 0.0;
         boot_warm_t_ = 0.0;
         mode_        = ConsoleMode::Boot;
+        return true;
+    }
+
+    void Console::pause_from_web()
+    {
+        if (mode_ != ConsoleMode::Running || pause_menu_.is_open())
+            return; // nothing to pause, or a menu is already up (never toggle it closed)
+        // Same menu the Running-mode ESC opens (kiosk hides the developer items).
+        pause_menu_.open(with_exit(kiosk_ ? std::vector<std::string> {"continue", "reset cart"}
+                                          : std::vector<std::string> {
+                                                "continue", "reset cart", "edit", "explore", "shell"}));
+        audio_.pause_music(true);
+    }
+
+    bool Console::arm_cart(const std::string& path)
+    {
+        if (!load_cart_file(path))
+            return false;
+        audio_.stop_music(); // silence any previously-running cart before this one boots
+        audio_.stop_sfx(-1);
+        boot_next_ = ConsoleMode::Running; // what the boot gate hands off to
+        // Still on the "press a key to start" gate: leave it there so the gesture that dismisses
+        // it also unlocks and warms up the audio, then the gate starts this cart. If the gate is
+        // already past (e.g. the console dropped to the shell), replay the splash to run it now.
+        if (mode_ != ConsoleMode::Boot)
+        {
+            web_started_ = true;
+            boot_jingle_ = false;
+            boot_t_      = 0.0;
+            boot_warm_t_ = 0.0;
+            mode_        = ConsoleMode::Boot;
+        }
         return true;
     }
 
@@ -744,7 +780,8 @@ namespace lazy100
                 {
                     boot_warm_t_ += dt; // doubles as the prompt-blink timer
                     const bool gesture = !keyboard_.text().empty() || keyboard_.pressed(Keyboard::Return) ||
-                                         keyboard_.pressed(Keyboard::Escape) || mouse_.pressed(Mouse::Left);
+                                         keyboard_.pressed(Keyboard::Escape) || mouse_.pressed(Mouse::Left) ||
+                                         input_.held_mask() != 0; // the web virtual gamepad also starts it
                     if (gesture)
                     {
                         web_started_ = true;
@@ -817,7 +854,11 @@ namespace lazy100
                     }
                     else
                     {
-                        pause_menu_.open(with_exit({"continue", "reset cart", "edit", "explore", "shell"}));
+                        // Kiosk (home) hides the developer items; indices 0/1 stay put so the
+                        // continue/reset cases below are unaffected.
+                        pause_menu_.open(with_exit(kiosk_
+                            ? std::vector<std::string>{"continue", "reset cart"}
+                            : std::vector<std::string>{"continue", "reset cart", "edit", "explore", "shell"}));
                         audio_.pause_music(true);
                     }
                 }
@@ -933,8 +974,9 @@ namespace lazy100
             pause_menu_.draw(disp);
 
         // Software pixel cursor, drawn on top. Context-dependent in the editor/shell; the
-        // running cart owns the screen, so we leave the cursor off there.
-        if (mouse_.in_bounds())
+        // running cart owns the screen, so we leave the cursor off there. The pause menu is
+        // keyboard-driven, so the cursor stays hidden while it's up.
+        if (mouse_.in_bounds() && !pause_menu_.is_open())
         {
             if (mode_ == ConsoleMode::Editor)
                 cursor::draw(disp, editor_host_.cursor(*this), mouse_.x(), mouse_.y());

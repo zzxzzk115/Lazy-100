@@ -60,6 +60,14 @@ namespace lazy100
 
         ConsoleMode mode() const { return mode_; }
         void        set_mode(ConsoleMode m) { mode_ = m; }
+        // Kiosk (consumer) mode: the play-only web pages (home) hide the developer pause-menu items
+        // (edit / explore / shell), leaving just continue / reset. The /console page stays full.
+        void        set_kiosk(bool on) { kiosk_ = on; }
+        bool        kiosk() const { return kiosk_; }
+        // Web: auto-pause when the tab goes to background — opens the cart pause menu (as ESC
+        // would), which also pauses the music. No-op unless a cart is running menu-less, so it
+        // never toggles an already-open menu closed.
+        void        pause_from_web();
         void        quit() { running_ = false; } // exit the main loop
 
         double frame_dt() const { return dt_; } // seconds elapsed last frame (for UI timing)
@@ -82,6 +90,9 @@ namespace lazy100
         // Load a cart and replay the power-on splash before starting it (ceremony) - the web site
         // uses this so a clicked cartridge always boots with the animation. False if it won't load.
         bool         restart_with_cart(const std::string& path);
+        // Load a cart but leave it for the "press a key to start" boot gate to run (so the gate's
+        // gesture unlocks/warms the audio). If the gate is already past, replays the splash now.
+        bool         arm_cart(const std::string& path);
         // The current cart runs in one of two VMs: the p8-dialect z8lua VM (p8 carts, or any
         // cart tagged `--language:p8`) or the native Lua 5.4 + sol2 VM. These dispatch the
         // lifecycle to whichever is active.
@@ -230,6 +241,7 @@ namespace lazy100
         ConsoleMode mode_      = ConsoleMode::Shell;
         bool        has_cart_  = false;
         bool        running_   = true;
+        bool        kiosk_     = false; // web home: hide developer pause-menu items (edit/explore/shell)
 
         double      boot_warm_t_ = 0.0;                 // seconds elapsed in the audio warm-up hold
         double      boot_t_      = 0.0;                 // seconds elapsed in the power-on splash
