@@ -2,32 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1d2b53">
   <title>LAZY-100 — Fantasy Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="view-home">
+<body data-page="home">
   <header class="topbar">
-    <span class="brand" id="home-link">
+    <a class="brand" href="./">
       <span class="c">L</span><span class="c">A</span><span class="c">Z</span><span class="c">Y</span><span class="c">-</span><span class="c">1</span><span class="c">0</span><span class="c">0</span><span class="cur">_</span>
-    </span>
+    </a>
     <span class="sub">fantasy console</span>
-    <nav class="nav">
-      <button class="tab" data-view="home">Home</button>
-      <button class="tab" data-view="carts">Carts</button>
-      <button class="tab" data-view="console">Console</button>
+    <nav class="nav" id="nav">
+      <a class="tab active" href="./">Home</a>
+      <a class="tab" href="carts/">Carts</a>
+      <a class="tab ghtab" href="https://github.com/zzxzzk115/Lazy-100" target="_blank" rel="noopener" aria-label="GitHub"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
     </nav>
-    <a class="ghlink" href="https://github.com/zzxzzk115/Lazy-100" target="_blank" rel="noopener">GitHub ▸</a>
+    <input id="file" type="file" accept=".png,.lz100,.lua" multiple hidden>
   </header>
 
   <main class="main">
-    <!-- Home: featured cartridges flanking the console -->
+    <!-- Home on mobile: no featured strip — just insert / random prompts (desktop shows the rails). -->
+    <div class="playhint" id="playhint">
+      <button class="hintbtn" id="hint-insert" type="button">▸ insert a cartridge</button>
+      <button class="hintbtn" id="hint-random" type="button">🎲 random cartridge</button>
+    </div>
     <aside class="rail" id="rail-left"></aside>
 
-    <!-- The embedded console. One canvas / one wasm module, shared by every view. -->
     <section class="stage">
       <div class="cart">
         <div class="ridges"></div>
@@ -36,96 +43,40 @@
           <div class="overlay" id="overlay"><div class="spinner"></div><div id="status">Loading…</div></div>
         </div>
         <div class="cart-label" id="cart-label"><b>LAZY</b>-100</div>
+        <div class="scrbrand" aria-hidden="true">LAZY-100</div>
       </div>
     </section>
 
     <aside class="rail" id="rail-right"></aside>
-
-    <!-- Shown (via body.too-small) when the viewport is below a 1x console fit -->
-    <div class="toosmall" id="toosmall">the window is too small<br>resize to fit the console</div>
-
-    <!-- Carts: searchable / filterable browser -->
-    <section class="browser" id="browser">
-      <div class="browser-head">
-        <input class="search" id="search" type="text" placeholder="search carts…" autocomplete="off">
-        <div class="chips" id="chips"></div>
-      </div>
-      <div class="grid" id="grid"></div>
-      <div class="empty" id="empty" hidden>no carts match.</div>
-    </section>
-
-    <!-- Console: the full online console + terminal log -->
-    <section class="terminal" id="terminal">
-      <div class="term-bar">
-        <span class="term-title">console</span>
-        <span class="hint">insert a <code>.lz100.png</code> / <code>.lz100</code>, or type <code>help</code></span>
-        <button class="btn" id="pick" type="button">▸ Insert cartridge</button>
-        <input id="file" type="file" accept=".png,.lz100,.lua" multiple hidden>
-      </div>
-      <pre id="log"></pre>
-    </section>
   </main>
+
+  <!-- Touch gamepad (mobile): a d-pad + O/X, mapped to the console's keys. -->
+  <div class="gamepad" id="gamepad" aria-hidden="true">
+    <div class="dpad">
+      <button class="pad up"    data-key="ArrowUp">▲</button>
+      <button class="pad left"  data-key="ArrowLeft">◀</button>
+      <button class="pad right" data-key="ArrowRight">▶</button>
+      <button class="pad down"  data-key="ArrowDown">▼</button>
+    </div>
+    <div class="face">
+      <button class="pad esc" data-key="Escape">ESC</button>
+      <button class="pad o" data-key="KeyZ">O</button>
+      <button class="pad x" data-key="KeyX">X</button>
+    </div>
+  </div>
+
+  <!-- On-screen keyboard for shell/editor modes (built by site.js). The console screen doubles as a
+       trackpad for the mouse in those modes. Run-cart mode shows the gamepad above instead. -->
+  <div class="softkb" id="softkb" aria-hidden="true"></div>
 
   <footer class="statusbar">
     <span id="foot">boot…</span>
     <span class="spacer"></span>
     <span class="muted">carts from <a href="https://github.com/zzxzzk115/Lazy-100-games" target="_blank" rel="noopener">Lazy-100-games</a></span>
+    <span class="muted copyright">© Lazy_V 2017-present</span>
   </footer>
 
-  <script>
-    /* Emscripten Module wiring — MUST run before lazy100.js. Adapted from web/shell.html:
-       canvas target, log routing, and the IDBFS preRun gate so a previous session's
-       /carts and /saves are restored before main() starts. site.js adds the catalog UI. */
-    (function () {
-      var canvas = document.getElementById("canvas");
-      var overlay = document.getElementById("overlay");
-      var statusEl = document.getElementById("status");
-      var logEl = document.getElementById("log");
-      var footEl = document.getElementById("foot");
-      var lines = 0, MAX = 800;
-
-      window.lzAppendLog = function (text, cls) {
-        if (text == null) return;
-        var msg = String(text);
-        if (footEl) footEl.textContent = msg;
-        var div = document.createElement("div");
-        div.className = cls || "l"; div.textContent = msg;
-        logEl.appendChild(div);
-        if (++lines > MAX && logEl.firstChild) { logEl.removeChild(logEl.firstChild); lines--; }
-        logEl.scrollTop = logEl.scrollHeight;
-      };
-
-      var Module = window.Module || {};
-      Module.canvas = canvas;
-      Module.print = function (t) { window.lzAppendLog(t, "l"); };
-      Module.printErr = function (t) { window.lzAppendLog(t, /error|fail|abort/i.test(String(t)) ? "e" : "w"); };
-      Module.setStatus = function (t) { if (statusEl) statusEl.textContent = t || "Running"; };
-      Module.preRun = Module.preRun || [];
-      Module.preRun.push(function () {
-        try {
-          var f = (typeof FS !== "undefined") ? FS : Module.FS;
-          try { f.mkdir("/carts"); } catch (e) {}
-          try { f.mkdir("/saves"); } catch (e) {}
-          var idbfs = f.filesystems && f.filesystems.IDBFS;
-          var addDep = Module.addRunDependency, remDep = Module.removeRunDependency;
-          if (!idbfs || !addDep || !remDep) { window.lzAppendLog("no IDBFS - storage is session-only", "w"); return; }
-          f.mount(idbfs, {}, "/carts");
-          f.mount(idbfs, {}, "/saves");
-          addDep("lz-idbfs");
-          f.syncfs(true, function (err) { if (err) window.lzAppendLog("storage load failed: " + err, "w"); remDep("lz-idbfs"); });
-        } catch (e) { window.lzAppendLog("storage init failed: " + e, "w"); }
-      });
-      Module.onRuntimeInitialized = function () {
-        window.lzReady = true;
-        overlay.classList.add("hidden");
-        window.lzAppendLog("ready", "ok");
-        if (window.lzOnReady) window.lzOnReady();
-      };
-      Module.onAbort = function (what) { window.lzAppendLog("ABORT: " + what, "e"); overlay.classList.remove("hidden"); statusEl.textContent = "aborted"; };
-      setTimeout(function () { overlay.classList.add("hidden"); }, 8000);
-      window.Module = Module;
-    })();
-  </script>
+  <script src="boot.js"></script>
   <script src="lazy100.js"></script>
   <script src="site.js"></script>
 </body>

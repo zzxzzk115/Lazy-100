@@ -19,7 +19,7 @@ echo "==> building wasm console"
 echo "==> assembling site -> $OUT"
 rm -rf "$OUT"
 mkdir -p "$OUT"
-cp "$ROOT"/web/site/* "$OUT"/
+cp -r "$ROOT"/web/site/* "$OUT"/   # home (index) + the carts/ subpage
 cp "$WASM_DIR"/lazy100.js "$WASM_DIR"/lazy100.wasm "$OUT"/
 
 echo "==> done. site at: $OUT"

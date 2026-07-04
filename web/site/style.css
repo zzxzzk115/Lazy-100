@@ -5,13 +5,25 @@
   --err:#ff004d; --warn:#ffa300; --ok:#00e436; --cart:#7e2553; --px:3px;
   --pixel:"Press Start 2P", ui-monospace, monospace;
   --term:"VT323", ui-monospace, "Cascadia Mono", monospace;
+  /* vertical space the fixed touch gamepad actually occupies: dpad 150 + 14 top pad + 14 bottom pad
+     + the home-indicator safe area, plus a small gap. fitConsole reads .main's padding-bottom, so
+     this stays the single source of truth for both the CSS reserve and the JS console sizing. */
+  --pad-reserve:calc(192px + env(safe-area-inset-bottom));
+  /* the on-screen keyboard is taller than the gamepad: 5 rows * 42 + gaps + padding. */
+  --kb-reserve:calc(252px + env(safe-area-inset-bottom));
 }
 * { box-sizing:border-box; }
 html,body { margin:0; min-height:100%; color:var(--text);
   font-family:var(--term); font-size:18px; letter-spacing:.5px;
   background:linear-gradient(180deg, var(--bg-1), var(--bg-0)) fixed;
-  image-rendering:pixelated; }
-body { display:flex; flex-direction:column; min-height:100vh; }
+  image-rendering:pixelated;
+  touch-action:pan-x pan-y; /* keep scrolling; kill double-tap-to-zoom (pinch is blocked in JS) */
+  -webkit-text-size-adjust:100%; }
+body { display:flex; flex-direction:column; min-height:100vh;
+  /* the whole page is a game console UI: nothing should long-press-select or pop the iOS callout.
+     Text entry/copy is re-enabled below only where it's actually useful (search box, terminal log). */
+  user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+.search, #log, #log * { user-select:text; -webkit-user-select:text; -webkit-touch-callout:default; }
 a { color:var(--accent-2); text-decoration:none; }
 a:hover { color:var(--accent); }
 
@@ -24,7 +36,7 @@ a:hover { color:var(--accent); }
 /* ---- header ---- */
 .topbar { display:flex; align-items:center; gap:14px; padding:12px 18px;
   border-bottom:var(--px) solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
-.brand { font-family:var(--pixel); font-size:16px; letter-spacing:1px; cursor:pointer; }
+.brand { font-family:var(--pixel); font-size:16px; letter-spacing:1px; cursor:pointer; white-space:nowrap; }
 .brand .c { display:inline-block; animation:rainbow 1.2s steps(1) infinite; }
 .brand .c:nth-child(1){animation-delay:0s} .brand .c:nth-child(2){animation-delay:-.13s}
 .brand .c:nth-child(3){animation-delay:-.26s} .brand .c:nth-child(4){animation-delay:-.39s}
@@ -41,18 +53,19 @@ a:hover { color:var(--accent); }
   color:var(--muted); background:transparent; border:var(--px) solid var(--line); padding:9px 12px; cursor:pointer; }
 .tab:hover { color:var(--text); }
 .tab.active { color:var(--bg-0); background:var(--accent-2); border-color:var(--accent-2); box-shadow:0 var(--px) 0 #065ab5; }
+.tab.ghtab { display:flex; align-items:center; padding:7px 9px; } /* GitHub icon button */
+.tab.ghtab svg { display:block; }
 
-/* ---- layout / views ---- */
-.main { flex:1; display:flex; gap:18px; padding:20px; align-items:flex-start; justify-content:center; }
+/* ---- layout: one page each (/, /carts, /console) ---- */
+.main { flex:1; display:flex; gap:18px; padding:20px; align-items:center; justify-content:center; }
 .rail { display:none; flex:0 0 clamp(180px, 15vw, 260px); flex-direction:column; gap:14px; }
 .browser, .terminal { display:none; }
 
-body.view-home .main { align-items:center; }
-body.view-home .rail { display:flex; }
-body.view-carts .main { flex-direction:column; align-items:center; }
-body.view-carts .browser { display:flex; }
-body.view-console .main { flex-direction:column; align-items:center; }
-body.view-console .terminal { display:flex; }
+body[data-page="home"] .rail { display:flex; }
+body[data-page="carts"] .main { flex-direction:column; align-items:center; }
+body[data-page="carts"] .browser { display:flex; }
+body[data-page="console"] .main { flex-direction:column; align-items:center; }
+body[data-page="console"] .terminal { display:flex; }
 
 /* ---- the console stage (always present) ---- */
 .stage { position:relative; display:flex; align-items:center; justify-content:center; padding:6px; }
@@ -68,18 +81,15 @@ body.view-console .terminal { display:flex; }
    fits the viewport, so pixels stay crisp (no fractional scaling). These are just a pre-JS
    fallback. Below a 1x fit the whole stage is hidden (body.too-small). */
 #canvas { display:block; outline:none; background:#000; image-rendering:pixelated;
-  width:960px; height:720px; max-width:100%; }
-body.view-carts .stage { display:none; } /* carts view is the grid; playing switches to home */
-
-.toosmall { display:none; font-family:var(--pixel); font-size:11px; color:var(--muted);
-  text-align:center; line-height:1.8; padding:40px; }
-body.too-small .stage, body.too-small .rail, body.too-small .browser, body.too-small .terminal { display:none; }
-body.too-small .toosmall { display:block; }
+  aspect-ratio:4/3; width:min(960px, 100%); height:auto; }
 .cart-label { align-self:center; font-family:var(--pixel); padding:7px 18px; background:#fff1e8;
   color:#1d2b53; letter-spacing:1px; font-size:11px; max-width:100%; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap;
   box-shadow:inset -3px -3px 0 #0000001f, inset 3px 3px 0 #ffffffcc; }
 .cart-label b { color:var(--accent); }
+.scrbrand { display:none; align-self:center; font-family:var(--pixel); font-size:12px; letter-spacing:2px;
+  padding:6px 0; background:linear-gradient(90deg,#ff004d,#ffa300,#ffec27 42%,#00e436,#29adff,#ff77a8);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent; }
 .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
   justify-content:center; gap:16px; background:#000000f2; color:var(--muted);
   font-family:var(--pixel); font-size:9px; text-transform:uppercase; transition:opacity .35s ease; }
@@ -88,24 +98,72 @@ body.too-small .toosmall { display:block; }
   clip-path:polygon(0 0,100% 0,100% 100%,0 100%); }
 @keyframes sp { to { transform:rotate(360deg); } }
 
-/* ---- cartridge cards (rails + grid) ---- */
-.card { position:relative; display:flex; flex-direction:column; gap:6px; padding:10px; cursor:pointer;
-  background:var(--panel); border:var(--px) solid var(--line); text-align:left; color:var(--text);
-  font-family:var(--term); transition:transform .08s ease, border-color .08s ease; }
-.card:hover { border-color:var(--accent-2); transform:translateY(-2px); }
+/* ---- touch gamepad: only on coarse-pointer (touch) devices, over the console pages ---- */
+.gamepad { display:none; position:fixed; left:0; right:0; bottom:0; z-index:20; padding:14px;
+  padding-bottom:calc(14px + env(safe-area-inset-bottom)); justify-content:space-between;
+  align-items:flex-end; pointer-events:none; }
+/* Touch control sets are mutually exclusive by console mode: run-cart shows the gamepad; the shell/
+   editors show the on-screen keyboard (and the screen becomes a trackpad). data-ctrl is set by JS. */
+@media (pointer:coarse) {
+  body[data-page="home"][data-ctrl="pad"] .gamepad { display:flex; }
+  body[data-page="home"][data-ctrl="tool"] .softkb { display:flex; }
+}
+/* Handheld layout: d-pad (plus) on the left, O/X on the right in a diagonal (O upper-right,
+   X lower-left) like a real fantasy-console pad, with a small ESC/menu pill above them. */
+.dpad { position:relative; width:150px; height:150px; }
+.face { position:relative; width:150px; height:150px; }
+.pad { pointer-events:auto; font-family:var(--pixel); font-size:15px; color:var(--text);
+  background:#1d2b53d0; border:var(--px) solid var(--line); touch-action:none;
+  user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; /* no long-press select/copy */
+  display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.pad.held { background:var(--accent-2); color:var(--bg-0); }
+.dpad .pad { position:absolute; width:50px; height:50px; }
+.pad.up { top:0; left:50px; } .pad.down { bottom:0; left:50px; }
+.pad.left { left:0; top:50px; } .pad.right { right:0; top:50px; }
+.face .pad { position:absolute; width:64px; height:64px; border-radius:50%; font-size:20px; }
+.pad.o { top:14px; right:2px; border-color:var(--ok); } .pad.o.held { background:var(--ok); color:var(--bg-0); }
+.pad.x { top:80px; right:76px; border-color:var(--accent); } .pad.x.held { background:var(--accent); color:var(--bg-0); }
+.pad.esc { top:-8px; left:6px; width:60px; height:26px; border-radius:13px; font-size:10px;
+  letter-spacing:1px; border-color:var(--muted); color:var(--muted); }
+.pad.esc.held { background:var(--muted); color:var(--bg-0); }
+
+/* ---- on-screen keyboard (shell/editor/explore modes on touch) ---- */
+.softkb { display:none; position:fixed; left:0; right:0; bottom:0; z-index:20; flex-direction:column;
+  gap:5px; padding:6px 4px calc(6px + env(safe-area-inset-bottom)); background:#000000d8;
+  touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+.softkb .krow { display:flex; gap:4px; justify-content:center; }
+.softkb .key { flex:1 1 0; min-width:0; height:42px; display:flex; align-items:center; justify-content:center;
+  font-family:var(--pixel); font-size:11px; color:var(--text); background:#1d2b53e0;
+  border:var(--px) solid var(--line); cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.softkb .key.held, .softkb .key:active { background:var(--accent-2); color:var(--bg-0); }
+.softkb .key.shift.on { background:var(--ok); color:var(--bg-0); border-color:var(--ok); }
+
+/* ---- home: insert / random prompt. Desktop: stacked in the right rail (JS moves it there);
+   mobile: a top strip replacing the featured rail. ---- */
+.playhint { display:none; gap:10px; justify-content:center; flex-wrap:wrap; }
+.rail .playhint { display:flex; flex-direction:column; }
+.hintbtn { font-family:var(--pixel); font-size:11px; text-transform:uppercase; letter-spacing:1px;
+  color:var(--text); background:var(--panel); border:var(--px) solid var(--line); padding:14px 16px;
+  cursor:pointer; box-shadow:0 var(--px) 0 #0006; }
+.hintbtn:active { transform:translateY(var(--px)); box-shadow:none; }
+
+/* ---- cartridge cards (rails + grid) ---- The .lz100.png is a full cartridge (art + title +
+   author), so a card is just that image at its natural ratio: no border, no extra chrome. */
+.card { display:block; padding:0; border:0; background:none; cursor:pointer;
+  transition:transform .08s ease, filter .08s ease; }
+.card:hover { transform:translateY(-3px); filter:brightness(1.08); }
 .card:active { transform:translateY(0); }
-.card .thumb { width:100%; aspect-ratio:4/3; background:#05050b; image-rendering:pixelated;
-  object-fit:contain; box-shadow:inset 0 0 0 2px #000; }
-.card .cname { font-family:var(--pixel); font-size:9px; line-height:1.4; color:var(--text);
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.card .cauthor { font-size:15px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.card .thumb { display:block; width:100%; height:auto; image-rendering:pixelated; }
+.card .noimg { aspect-ratio:352/346; display:flex; align-items:center; justify-content:center;
+  background:var(--panel); color:var(--muted); font-family:var(--pixel); font-size:9px;
+  text-align:center; padding:10px; line-height:1.5; }
 .rail-title { font-family:var(--pixel); font-size:8px; text-transform:uppercase; color:var(--muted); margin:2px; }
 .morecarts { font-family:var(--pixel); font-size:9px; text-transform:uppercase; color:var(--bg-0);
   background:var(--accent); border:0; padding:11px; cursor:pointer; box-shadow:0 var(--px) 0 #a11d5b; letter-spacing:1px; }
 .morecarts:active { transform:translateY(var(--px)); box-shadow:none; }
 
 /* ---- carts browser ---- */
-.browser { width:100%; max-width:1100px; flex-direction:column; gap:16px; margin-top:14px; }
+.browser { width:100%; max-width:1280px; flex-direction:column; gap:16px; margin-top:14px; }
 .browser-head { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
 .search { font-family:var(--term); font-size:18px; color:var(--text); background:var(--bg-0);
   border:var(--px) solid var(--line); padding:9px 12px; min-width:220px; flex:1; }
@@ -115,7 +173,10 @@ body.too-small .toosmall { display:block; }
   background:transparent; border:var(--px) solid var(--line); padding:8px 10px; cursor:pointer; }
 .chip:hover { color:var(--text); }
 .chip.active { color:var(--bg-0); background:var(--ok); border-color:var(--ok); }
-.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:16px; }
+/* Exactly 1x columns (the cart PNG is 352 wide) so the pixel art is crisp, not stretched; the row
+   is centred, and a column shrinks only when the viewport is narrower than one card. */
+.grid { display:grid; justify-content:center;
+  grid-template-columns:repeat(auto-fill, minmax(min(100%, 352px), 352px)); gap:20px; }
 .empty { font-family:var(--pixel); font-size:10px; color:var(--muted); padding:20px; text-align:center; }
 
 /* ---- console terminal ---- */
@@ -136,12 +197,48 @@ body.too-small .toosmall { display:block; }
 .statusbar { display:flex; align-items:center; gap:10px; padding:8px 18px; font-size:15px; color:var(--muted);
   border-top:var(--px) solid var(--line); background:var(--panel); }
 .statusbar .spacer { flex:1; }
+.statusbar .copyright { margin-left:16px; padding-left:16px; border-left:var(--px) solid var(--line); }
 .muted { color:var(--muted); }
 
-@media (max-width:860px) {
-  body.view-home .main { flex-direction:column; }
-  .rail { flex-basis:auto; width:100%; max-width:560px;
-    flex-direction:row; overflow-x:auto; }
-  .rail .card { min-width:150px; }
-  #canvas, body.view-console #canvas { width:88vw; height:auto; aspect-ratio:4/3; }
+/* Handheld layout — menu bar / screen / gamepad, no footer or cart bezel. Applies to narrow phones
+   AND any touch device (tablets like iPad Pro are wide but still want the handheld experience, not the
+   desktop rails with a floating gamepad). */
+@media (max-width:860px), (pointer:coarse) {
+  /* App-shell: the page is exactly one viewport tall and never scrolls. 100dvh tracks Safari's live
+     URL-bar height; overflow:hidden + overscroll:none kill page scroll and rubber-band bounce. Only
+     the carts grid gets its own internal scroll (below). This also fixes the phantom scroll from the
+     old min-height:100vh (100vh > visible area on iOS) and from unaccounted safe areas. */
+  html, body { height:100dvh; min-height:0; overflow:hidden; overscroll-behavior:none; }
+  .main { flex:1; min-height:0; }
+  .topbar { padding:10px 12px; padding-top:calc(10px + env(safe-area-inset-top)); position:sticky; flex:0 0 auto; }
+  .brand { font-size:13px; }
+  .sub { display:none; }
+  /* nav stays inline: just Home / Carts / GitHub-icon. */
+  .nav { margin-left:auto; gap:6px; }
+  .tab { font-size:9px; padding:9px 10px; }
+  .main { padding:6px; }
+  .statusbar { display:none; }
+  .grid { gap:14px; } /* columns come from the base rule: >=1x, single column when narrow */
+
+  /* home: column stack — insert/random prompt at top, the bare screen at the bottom above the touch
+     controls. No featured strip on mobile (that's a desktop-only rail). The reserve depends on which
+     control set is showing: the gamepad (--pad-reserve) or the taller on-screen keyboard (--kb-reserve). */
+  body[data-page="home"] .main { flex-direction:column; align-items:stretch; justify-content:flex-start;
+    gap:8px; padding-bottom:var(--pad-reserve); }
+  body[data-page="home"][data-ctrl="tool"] .main { padding-bottom:var(--kb-reserve); }
+  body[data-page="home"] .rail { display:none; } /* no featured strip on mobile */
+  body[data-page="home"] .playhint { display:flex; flex:0 0 auto; }
+  body[data-page="home"][data-ctrl="tool"] .playhint { display:none; } /* no room next to the keyboard */
+  /* carts: the page itself doesn't scroll; the GRID scrolls internally. main/browser are flex columns
+     with min-height:0 so the grid can take the leftover height and own the scroll (search+chips stay
+     pinned above it). Bottom padding on the grid clears the home-indicator safe area. */
+  body[data-page="carts"] .main { justify-content:flex-start; flex-direction:column; overflow:hidden; padding:6px; }
+  body[data-page="carts"] .browser { flex:1; min-height:0; margin-top:8px; }
+  body[data-page="carts"] .grid { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+    padding-bottom:calc(12px + env(safe-area-inset-bottom)); align-content:start; }
+  body[data-page="home"] .stage { align-self:center; margin-top:auto; margin-bottom:6px; padding:0; }
+  body[data-page="home"] .scrbrand { display:block; }
+  body[data-page="home"] .cart { background:none; padding:0; gap:0; box-shadow:none; clip-path:none; }
+  body[data-page="home"] .ridges, body[data-page="home"] .cart-label { display:none; }
+  body[data-page="home"] .screen { padding:0; box-shadow:none; }
 }
