@@ -76,6 +76,11 @@ namespace lazy100
         ui::vdivider(fb, stripX - 2, 2, kTabH - 4, ui::kBorder); // tools | toggles separator
         draw::line(fb, 0, kTabH, W - 1, kTabH, ui::kBorder);     // bar underline
 
+        // Centered play button: run the cart straight from the editor (same as menu "run cart").
+        // On a load error it stays here and the code editor's error bar explains why.
+        if (ui::icon_button(fb, con.mouse(), W / 2 - 6, (kTabH - 12) / 2, 12, 12, icon::Play, false))
+            con.start_cart();
+
         editors_[current_]->draw(con, fb);
         editors_[current_]->draw_tools(con, fb); // after draw: tool buttons sit above any clear
         ui::flush_tooltip(fb);                   // tooltips last, so nothing can cover them

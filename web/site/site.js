@@ -12,6 +12,13 @@
 
   var games = [], activeCat = null, query = "", catalogReady = false;
   var cartParam = new URLSearchParams(location.search).get("cart");
+  // ?cart_url=<raw url>: play a cart straight from a URL (the catalog PR bot links PR previews
+  // this way). Locked to raw.githubusercontent.com so the page can't be used as a fetch proxy.
+  var cartUrlParam = new URLSearchParams(location.search).get("cart_url");
+  if (cartUrlParam) {
+    try { if (new URL(cartUrlParam).hostname !== "raw.githubusercontent.com") cartUrlParam = null; }
+    catch (e) { cartUrlParam = null; }
+  }
 
   var canvas = document.getElementById("canvas");
   var foot = document.getElementById("foot");
@@ -147,7 +154,7 @@
   // gesture (key, tap, or a virtual gamepad button) is what unlocks/warms the audio.
   var armed = false;
   function armRandom() {
-    if (PAGE !== "home" || cartParam || armed || !games.length || !window.lzReady) return;
+    if (PAGE !== "home" || cartParam || cartUrlParam || armed || !games.length || !window.lzReady) return;
     armed = true;
     withCart(games[Math.floor(Math.random() * games.length)], function (path, gg) {
       window.Module.ccall("lazy100_arm_cart", "number", ["string"], [path]);
@@ -460,13 +467,31 @@
     var g = games.filter(function (x) { return x.id === cartParam; })[0];
     if (g) { bootGame(g); cartParam = null; }
   }
+  // ?cart_url: fetch the cart into MEMFS and ARM it — the press-any-key gate both unlocks the
+  // audio and starts it, since a page load is not a user gesture.
+  function tryStartUrl() {
+    if (PAGE !== "home" || !cartUrlParam || !window.lzReady) return;
+    var url = cartUrlParam; cartUrlParam = null;
+    var name = (url.split("/").pop() || "cart.lz100.png").split("?")[0];
+    log("fetching PR cart " + name + "…", "l");
+    fetch(url).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+      .then(function (buf) {
+        var f = window.Module.FS || window.FS;
+        try { f.mkdir("/carts"); } catch (e) {}
+        var path = "/carts/" + name;
+        f.writeFile(path, new Uint8Array(buf));
+        window.Module.ccall("lazy100_arm_cart", "number", ["string"], [path]);
+        setLabel({ name: name.replace(/\.(lz100\.)?png$|\.lz100$/i, "") });
+        log("press any key to play " + name, "l");
+      }).catch(function (e) { log("PR cart fetch failed: " + e.message, "e"); });
+  }
 
   setupMobileChrome();
   if (HAS_CONSOLE) {
     // The full console lives on home now: gamepad for carts, on-screen keyboard + screen-trackpad for
     // the shell/editors. Mode polling swaps the control set. (No kiosk gating — home is not crippled.)
     document.body.dataset.ctrl = "pad";
-    window.lzOnReady = function () { fitConsole(); tryStartParam(); armRandom(); pollMode(); };
+    window.lzOnReady = function () { fitConsole(); tryStartParam(); tryStartUrl(); armRandom(); pollMode(); };
     fitConsole();
     setupGamepad();
     buildSoftKeyboard();
