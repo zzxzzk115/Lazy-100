@@ -30,6 +30,18 @@ jobs:
             plat: linux
             arch: x86_64
             artifact_suffix: linux-x86_64
+          # Raspberry Pi 4/5 (64-bit OS): GitHub's native arm64 runner, no cross toolchain.
+          - os: ubuntu-24.04-arm
+            plat: linux
+            arch: arm64
+            artifact_suffix: linux-arm64
+          # 32-bit ARM (Pi 2/3 or 32-bit OS): best-effort cross build; fail-fast is off, so a
+          # failure here never blocks the other platforms' assets.
+          - os: ubuntu-latest
+            plat: linux
+            arch: armv7
+            artifact_suffix: linux-armv7
+            cross: armhf
           - os: macos-latest
             plat: macosx
             arch: arm64
@@ -50,7 +62,7 @@ jobs:
           build-cache: true
 
       - name: Install Linux Dependencies
-        if: ${{ matrix.plat == 'linux' }}
+        if: ${{ matrix.plat == 'linux' && !matrix.cross }}
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config \
@@ -59,8 +71,44 @@ jobs:
             libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev \
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libdrm-dev libgbm-dev
 
+      # armv7 cross: multiarch apt for the armhf system libs + the gnueabihf toolchain.
+      - name: Setup armv7 Cross Environment
+        if: ${{ matrix.cross == 'armhf' }}
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture armhf
+          # amd64 stays on azure mirrors; armhf comes from ports.ubuntu.com.
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
+          sudo tee /etc/apt/sources.list.d/armhf.sources > /dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-security
+          Components: main universe restricted multiverse
+          Architectures: armhf
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            crossbuild-essential-armhf \
+            libx11-dev:armhf libxext-dev:armhf libxrandr-dev:armhf libxcursor-dev:armhf \
+            libxi-dev:armhf libxfixes-dev:armhf libxss-dev:armhf libwayland-dev:armhf \
+            libxkbcommon-dev:armhf libdecor-0-dev:armhf libegl1-mesa-dev:armhf \
+            libgl1-mesa-dev:armhf libvulkan-dev:armhf libasound2-dev:armhf \
+            libpulse-dev:armhf libdbus-1-dev:armhf libudev-dev:armhf libdrm-dev:armhf \
+            libgbm-dev:armhf
+
       - name: Configure
+        if: ${{ !matrix.cross }}
         run: xmake f -m release -p ${{ matrix.plat }} -a ${{ matrix.arch }} --lazy100_build_tests=n --policies=build.ccache:y -y
+
+      - name: Configure (armv7 cross)
+        if: ${{ matrix.cross == 'armhf' }}
+        env:
+          PKG_CONFIG_PATH: /usr/lib/arm-linux-gnueabihf/pkgconfig
+        run: >
+          xmake f -m release -p linux -a armv7 --toolchain=cross --cross=arm-linux-gnueabihf-
+          --cxflags="-I/usr/include -I/usr/include/arm-linux-gnueabihf"
+          --ldflags="-L/usr/lib/arm-linux-gnueabihf"
+          --lazy100_build_tests=n --policies=build.ccache:y -y
 
       - name: Build console + tools
         run: |
