@@ -19,6 +19,14 @@ namespace lazy100
         int         wheel = 0;         // accumulated wheel delta this frame
     };
 
+    // System clipboard (SDL-backed; on the web this is SDL's internal clipboard, which still
+    // makes copy/paste work within the console). Used by the code editor.
+    namespace clipboard
+    {
+        void        set_text(const std::string& s);
+        std::string get_text();
+    } // namespace clipboard
+
     // Owns the SDL3 window + the SDL video subsystem. The native handle it exposes is fed
     // to VRI (via vriWindowHandleFromSDL3) inside gpu/present; this class itself never
     // touches VRI.

@@ -29,6 +29,17 @@ namespace lazy100
         void        accept_completion();                // replace the prefix with the selected match
         void        draw_manual(Framebuffer& fb, int statusY); // the book-icon cheatsheet overlay
 
+        // ---- selection & clipboard ----
+        bool        has_sel() const;                                        // non-empty selection?
+        void        sel_range(int& x0, int& y0, int& x1, int& y1) const;    // normalized (start<=end)
+        std::string sel_text() const;                                       // selected text, '\n'-joined
+        void        erase_sel();                                            // delete selection, caret to start
+        void        insert_text(const std::string& text);                   // multi-line insert at caret
+        void        clip_copy();                                            // selection -> clipboard
+        void        clip_cut();                                             // copy + erase
+        void        clip_paste();                                           // clipboard -> buffer
+        void        select_all();
+
         std::vector<std::string> lines_ {""};
         std::string              cache_;     // last code we synced, to detect external edits
         int                      cx_    = 0; // cursor byte offset within the line (codepoint boundary)
@@ -43,5 +54,14 @@ namespace lazy100
 
         bool manual_open_   = false; // book-icon cheatsheet overlay (API signatures by category)
         int  manual_scroll_ = 0;     // first visible cheatsheet row
+
+        // Selection: anchor (set when the selection starts) .. caret. Byte offsets like cx_/cy_.
+        bool sel_active_ = false;
+        int  sel_ax_ = 0, sel_ay_ = 0;
+        bool mouse_sel_ = false; // a left-drag selection is in progress
+
+        // Right-click context menu (cut / copy / paste / select all).
+        bool ctx_open_ = false;
+        int  ctx_x_ = 0, ctx_y_ = 0; // top-left, framebuffer coords
     };
 } // namespace lazy100

@@ -7,6 +7,19 @@
 
 namespace lazy100
 {
+    namespace clipboard
+    {
+        void set_text(const std::string& s) { SDL_SetClipboardText(s.c_str()); }
+
+        std::string get_text()
+        {
+            char*       t = SDL_GetClipboardText();
+            std::string s = t ? t : "";
+            SDL_free(t);
+            return s;
+        }
+    } // namespace clipboard
+
     Window::~Window() { destroy(); }
 
     bool Window::create(const char* title, u32 width, u32 height)

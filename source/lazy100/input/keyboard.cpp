@@ -31,6 +31,10 @@ namespace lazy100
                 case Keyboard::PageUp: return SDL_SCANCODE_PAGEUP;
                 case Keyboard::PageDown: return SDL_SCANCODE_PAGEDOWN;
                 case Keyboard::Num7: return SDL_SCANCODE_7;
+                case Keyboard::A: return SDL_SCANCODE_A;
+                case Keyboard::C: return SDL_SCANCODE_C;
+                case Keyboard::V: return SDL_SCANCODE_V;
+                case Keyboard::X: return SDL_SCANCODE_X;
                 default: return SDL_SCANCODE_UNKNOWN;
             }
         }

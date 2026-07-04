@@ -288,6 +288,7 @@
   function setupTrackpad() {
     if (!canvas) return;
     var active = false, moved = false, dragging = false, lastX = 0, lastY = 0, startX = 0, startY = 0, downT = 0, holdT = null;
+    var lastTapT = 0, selDrag = false; // double-tap: hold-select; release pops the context menu
     var SENS = 1.4;
     function scale() { var r = canvas.getBoundingClientRect(); return r.width > 0 ? (BASE_W / r.width) * SENS : SENS; }
     canvas.addEventListener("pointerdown", function (e) {
@@ -298,7 +299,9 @@
       active = true; moved = false; dragging = false; downT = Date.now();
       lastX = startX = e.clientX; lastY = startY = e.clientY;
       try { canvas.setPointerCapture(e.pointerId); } catch (er) {}
-      holdT = setTimeout(function () { if (active && !moved) { dragging = true; sendMouse(1); } }, 320); // long-press -> button down
+      selDrag = Date.now() - lastTapT < 350; // quick second tap: press-and-hold from here (selection)
+      if (selDrag) { dragging = true; sendMouse(1); }
+      else holdT = setTimeout(function () { if (active && !moved) { dragging = true; sendMouse(1); } }, 320); // long-press -> button down
     });
     canvas.addEventListener("pointermove", function (e) {
       if (!active) return;
@@ -314,8 +317,18 @@
       if (!active) return;
       active = false;
       if (holdT) { clearTimeout(holdT); holdT = null; }
-      if (dragging) { dragging = false; sendMouse(0); }
-      else if (!moved && Date.now() - downT < 320) { sendMouse(1); setTimeout(function () { sendMouse(0); }, 70); } // tap = click
+      if (selDrag) {
+        // Double-tap selection finished: release the button, then a right-click pulse pops the
+        // code editor's cut/copy/paste menu at the cursor.
+        selDrag = false; dragging = false;
+        sendMouse(0);
+        setTimeout(function () { sendMouse(2); setTimeout(function () { sendMouse(0); }, 70); }, 60);
+      }
+      else if (dragging) { dragging = false; sendMouse(0); }
+      else if (!moved && Date.now() - downT < 320) { // tap = click (and arms the double-tap window)
+        lastTapT = Date.now();
+        sendMouse(1); setTimeout(function () { sendMouse(0); }, 70);
+      }
       else sendMouse(0);
     }
     canvas.addEventListener("pointerup", end);

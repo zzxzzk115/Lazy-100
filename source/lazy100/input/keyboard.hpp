@@ -31,6 +31,10 @@ namespace lazy100
             PageUp,
             PageDown,
             Num7, // for the Ctrl+7 "capture cart label" shortcut
+            A,    // Ctrl+A/C/V/X: the code editor's select-all / clipboard shortcuts.
+            C,    // Appended AFTER the original keys so the web inject_keys() bit layout
+            V,    // (Escape=0 .. Down=8) stays stable.
+            X,
             Count
         };
 

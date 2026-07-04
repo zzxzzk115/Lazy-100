@@ -2,6 +2,7 @@
 
 #include "lazy100/console/config.hpp"
 #include "lazy100/console/console.hpp"
+#include "lazy100/console/window.hpp" // clipboard
 #include "lazy100/editor/ui.hpp"
 #include "lazy100/input/keyboard.hpp"
 #include "lazy100/input/mouse.hpp"
@@ -22,6 +23,12 @@ namespace lazy100
     {
         constexpr int kTop    = EditorHost::kTabH + 2; // first text row y
         constexpr int kGutter = 22;                    // x where code text starts (line-number gutter left)
+
+        // Right-click context menu geometry + items (update() hit-tests, draw() renders).
+        const char* const kCtxItems[] = {"cut", "copy", "paste", "select all"};
+        constexpr int     kCtxCount   = 4;
+        constexpr int     kCtxW       = 78;
+        constexpr int     kCtxRow     = 12;
 
         bool is_cont(unsigned char b) { return (b & 0xC0) == 0x80; } // UTF-8 continuation byte
 
@@ -276,6 +283,7 @@ namespace lazy100
         cache_ = code;
         cy_    = std::min(cy_, static_cast<int>(lines_.size()) - 1);
         cx_    = snap(lines_[cy_], cx_);
+        sel_active_ = false; // external edit: any selection range is stale
     }
 
     void CodeEditor::flush_to(std::string& code) const
@@ -292,6 +300,11 @@ namespace lazy100
 
     bool CodeEditor::on_escape(Console&)
     {
+        if (ctx_open_)
+        {
+            ctx_open_ = false;
+            return true; // consumed: close the context menu instead of opening the pause menu
+        }
         if (manual_open_)
         {
             manual_open_ = false;
@@ -342,17 +355,102 @@ namespace lazy100
             return;
         }
 
-        // ---- mouse: wheel scrolls the view; left-click places the caret ----
+        // ---- mouse: wheel scrolls the view; left-click places the caret; drag selects ----
         const int lh      = font::line_height();
         const int statusY = static_cast<int>(kScreenH) - lh - 1;
         const int rows    = std::max(1, (statusY - kTop) / lh);
         if (const int w = m.wheel())
             top_ = std::clamp(top_ - w * 3, 0, std::max(0, static_cast<int>(lines_.size()) - rows));
-        if (m.pressed(Mouse::Left) && m.y() >= kTop && m.y() < statusY)
+
+        // Right-click context menu (cut/copy/paste/select all). While open it owns the mouse.
+        bool ateClick = false;
+        if (ctx_open_)
+        {
+            const int hit = (m.x() >= ctx_x_ && m.x() < ctx_x_ + kCtxW && m.y() >= ctx_y_ &&
+                             m.y() < ctx_y_ + kCtxCount * kCtxRow)
+                                ? (m.y() - ctx_y_) / kCtxRow
+                                : -1;
+            if (m.pressed(Mouse::Left) || m.pressed(Mouse::Right))
+            {
+                ctx_open_ = false;
+                ateClick  = true; // the closing click must not also move the caret below
+                if (m.pressed(Mouse::Left))
+                    switch (hit)
+                    {
+                        case 0: clip_cut(); break;
+                        case 1: clip_copy(); break;
+                        case 2: clip_paste(); break;
+                        case 3: select_all(); break;
+                        default: break; // outside: just close
+                    }
+            }
+            if (ctx_open_)
+            {
+                ++blink_;
+                return; // menu still up: swallow keys/caret input this frame
+            }
+        }
+        else if (m.pressed(Mouse::Right) && m.y() >= kTop && m.y() < statusY)
+        {
+            // Open at the pointer, clamped on-screen. The caret/selection stay put so
+            // cut/copy act on what is already selected.
+            ctx_open_ = true;
+            ctx_x_    = std::min(m.x(), static_cast<int>(kScreenW) - kCtxW - 2);
+            ctx_y_    = std::min(m.y(), statusY - kCtxCount * kCtxRow - 2);
+            ateClick  = true;
+        }
+
+        auto mouse_place = [&]
         {
             cy_ = std::clamp(top_ + (m.y() - kTop) / lh, 0, static_cast<int>(lines_.size()) - 1);
             cx_ = col_from_x(lines_[cy_], m.x() - kGutter + left_); // + left_: account for h-scroll
+        };
+        if (!ateClick && m.pressed(Mouse::Left) && m.y() >= kTop && m.y() < statusY)
+        {
+            mouse_place();
+            sel_ax_     = cx_; // anchor here; dragging extends the selection
+            sel_ay_     = cy_;
+            sel_active_ = true;
+            mouse_sel_  = true;
         }
+        else if (mouse_sel_ && m.down(Mouse::Left))
+            mouse_place();
+        if (mouse_sel_ && !m.down(Mouse::Left))
+        {
+            mouse_sel_ = false;
+            if (!has_sel())
+                sel_active_ = false; // plain click, no drag: no selection
+        }
+
+        // ---- clipboard shortcuts ---- (before any line references: paste/cut reshape lines_)
+        if (kb.ctrl())
+        {
+            if (kb.pressed(Keyboard::A))
+                select_all();
+            if (kb.pressed(Keyboard::C))
+                clip_copy();
+            if (kb.pressed(Keyboard::X))
+                clip_cut();
+            if (kb.pressed(Keyboard::V))
+                clip_paste();
+        }
+
+        // Shift+navigation extends a selection; plain navigation drops it.
+        const bool shiftSel  = kb.shift();
+        auto       begin_nav = [&]
+        {
+            if (shiftSel)
+            {
+                if (!sel_active_)
+                {
+                    sel_ax_     = cx_;
+                    sel_ay_     = cy_;
+                    sel_active_ = true;
+                }
+            }
+            else
+                sel_active_ = false;
+        };
 
         // Autocomplete popup captures Up/Down/Tab while it is open.
         refresh_completions();
@@ -360,9 +458,10 @@ namespace lazy100
 
         std::string& line = lines_[cy_];
 
-        // ---- navigation ----
+        // ---- navigation ---- (each move calls begin_nav: shift extends, plain drops the selection)
         if (kb.repeat(Keyboard::Left))
         {
+            begin_nav();
             if (cx_ > 0)
                 cx_ = prev_cp(line, cx_);
             else if (cy_ > 0)
@@ -373,6 +472,7 @@ namespace lazy100
         }
         if (kb.repeat(Keyboard::Right))
         {
+            begin_nav();
             if (cx_ < static_cast<int>(line.size()))
                 cx_ = next_cp(line, cx_);
             else if (cy_ + 1 < static_cast<int>(lines_.size()))
@@ -387,6 +487,7 @@ namespace lazy100
                 comp_sel_ = std::max(0, comp_sel_ - 1);
             else if (cy_ > 0)
             {
+                begin_nav();
                 --cy_;
                 cx_ = snap(lines_[cy_], cx_);
             }
@@ -397,33 +498,48 @@ namespace lazy100
                 comp_sel_ = std::min(static_cast<int>(matches_.size()) - 1, comp_sel_ + 1);
             else if (cy_ + 1 < static_cast<int>(lines_.size()))
             {
+                begin_nav();
                 ++cy_;
                 cx_ = snap(lines_[cy_], cx_);
             }
         }
         if (kb.repeat(Keyboard::Home))
+        {
+            begin_nav();
             cx_ = 0;
+        }
         if (kb.repeat(Keyboard::End))
+        {
+            begin_nav();
             cx_ = static_cast<int>(lines_[cy_].size());
+        }
         if (kb.repeat(Keyboard::PageUp))
+        {
+            begin_nav();
             cy_ = std::max(0, cy_ - 10), cx_ = snap(lines_[cy_], cx_);
+        }
         if (kb.repeat(Keyboard::PageDown))
+        {
+            begin_nav();
             cy_ = std::min(static_cast<int>(lines_.size()) - 1, cy_ + 10), cx_ = snap(lines_[cy_], cx_);
+        }
 
-        // ---- edits ---- (re-fetch the line ref after cy_ may have changed above)
-        std::string& cur = lines_[cy_];
+        // ---- edits ---- (an active selection is replaced/removed by any edit)
         if (kb.repeat(Keyboard::Backspace))
         {
-            if (cx_ > 0)
+            if (has_sel())
+                erase_sel();
+            else if (cx_ > 0)
             {
-                const int p = prev_cp(cur, cx_);
+                std::string& cur = lines_[cy_];
+                const int    p   = prev_cp(cur, cx_);
                 cur.erase(p, cx_ - p);
                 cx_ = p;
             }
             else if (cy_ > 0)
             {
                 const int join = static_cast<int>(lines_[cy_ - 1].size());
-                lines_[cy_ - 1] += cur;
+                lines_[cy_ - 1] += lines_[cy_];
                 lines_.erase(lines_.begin() + cy_);
                 --cy_;
                 cx_ = join;
@@ -431,17 +547,24 @@ namespace lazy100
         }
         if (kb.repeat(Keyboard::Delete))
         {
-            std::string& d = lines_[cy_];
-            if (cx_ < static_cast<int>(d.size()))
-                d.erase(cx_, next_cp(d, cx_) - cx_);
-            else if (cy_ + 1 < static_cast<int>(lines_.size()))
+            if (has_sel())
+                erase_sel();
+            else
             {
-                d += lines_[cy_ + 1];
-                lines_.erase(lines_.begin() + cy_ + 1);
+                std::string& d = lines_[cy_];
+                if (cx_ < static_cast<int>(d.size()))
+                    d.erase(cx_, next_cp(d, cx_) - cx_);
+                else if (cy_ + 1 < static_cast<int>(lines_.size()))
+                {
+                    d += lines_[cy_ + 1];
+                    lines_.erase(lines_.begin() + cy_ + 1);
+                }
             }
         }
         if (kb.repeat(Keyboard::Return))
         {
+            if (has_sel())
+                erase_sel();
             std::string& e   = lines_[cy_];
             std::string  rest = e.substr(cx_);
             e.erase(cx_);
@@ -455,6 +578,8 @@ namespace lazy100
                 accept_completion(); // Tab accepts the highlighted candidate
             else
             {
+                if (has_sel())
+                    erase_sel();
                 lines_[cy_].insert(cx_, "  ");
                 cx_ += 2;
             }
@@ -463,6 +588,8 @@ namespace lazy100
         const std::string& typed = kb.text();
         if (!typed.empty())
         {
+            if (has_sel())
+                erase_sel();
             lines_[cy_].insert(cx_, typed);
             cx_ += static_cast<int>(typed.size());
         }
@@ -533,6 +660,114 @@ namespace lazy100
         matches_.clear();
     }
 
+    // ---- selection & clipboard ----
+
+    bool CodeEditor::has_sel() const { return sel_active_ && (sel_ax_ != cx_ || sel_ay_ != cy_); }
+
+    void CodeEditor::sel_range(int& x0, int& y0, int& x1, int& y1) const
+    {
+        x0 = sel_ax_;
+        y0 = sel_ay_;
+        x1 = cx_;
+        y1 = cy_;
+        if (y0 > y1 || (y0 == y1 && x0 > x1))
+        {
+            std::swap(x0, x1);
+            std::swap(y0, y1);
+        }
+    }
+
+    std::string CodeEditor::sel_text() const
+    {
+        int x0, y0, x1, y1;
+        sel_range(x0, y0, x1, y1);
+        if (y0 == y1)
+            return lines_[y0].substr(x0, x1 - x0);
+        std::string t = lines_[y0].substr(x0);
+        for (int i = y0 + 1; i < y1; ++i)
+        {
+            t += '\n';
+            t += lines_[i];
+        }
+        t += '\n';
+        t += lines_[y1].substr(0, x1);
+        return t;
+    }
+
+    void CodeEditor::erase_sel()
+    {
+        int x0, y0, x1, y1;
+        sel_range(x0, y0, x1, y1);
+        if (y0 == y1)
+            lines_[y0].erase(x0, x1 - x0);
+        else
+        {
+            lines_[y0] = lines_[y0].substr(0, x0) + lines_[y1].substr(x1);
+            lines_.erase(lines_.begin() + y0 + 1, lines_.begin() + y1 + 1);
+        }
+        cy_         = y0;
+        cx_         = x0;
+        sel_active_ = false;
+    }
+
+    void CodeEditor::insert_text(const std::string& text)
+    {
+        std::string s;
+        s.reserve(text.size());
+        for (const char c : text)
+            if (c != '\r')
+                s += c; // normalize CRLF from external clipboards
+        size_t pos = 0;
+        while (true)
+        {
+            const size_t      nl  = s.find('\n', pos);
+            const std::string seg = s.substr(pos, (nl == std::string::npos ? s.size() : nl) - pos);
+            lines_[cy_].insert(cx_, seg);
+            cx_ += static_cast<int>(seg.size());
+            if (nl == std::string::npos)
+                break;
+            std::string rest = lines_[cy_].substr(cx_); // split at the caret for the newline
+            lines_[cy_].erase(cx_);
+            lines_.insert(lines_.begin() + cy_ + 1, rest);
+            ++cy_;
+            cx_ = 0;
+            pos = nl + 1;
+        }
+    }
+
+    void CodeEditor::clip_copy()
+    {
+        if (has_sel())
+            clipboard::set_text(sel_text());
+    }
+
+    void CodeEditor::clip_cut()
+    {
+        if (!has_sel())
+            return;
+        clipboard::set_text(sel_text());
+        erase_sel();
+    }
+
+    void CodeEditor::clip_paste()
+    {
+        const std::string t = clipboard::get_text();
+        if (t.empty())
+            return;
+        if (has_sel())
+            erase_sel();
+        insert_text(t);
+    }
+
+    void CodeEditor::select_all()
+    {
+        sel_ax_     = 0;
+        sel_ay_     = 0;
+        cy_         = static_cast<int>(lines_.size()) - 1;
+        cx_         = static_cast<int>(lines_[cy_].size());
+        sel_active_ = true;
+    }
+
     void CodeEditor::draw(Console& con, Framebuffer& fb)
     {
         (void)con;
@@ -574,6 +809,26 @@ namespace lazy100
             const int y = kTop + r * lh;
 
             const std::string& text = lines_[li];
+
+            // Selection highlight, under the text. Spans are computed in pixels from the byte
+            // range this row contributes; a selected newline shows as a small stub.
+            if (has_sel())
+            {
+                int sx0, sy0, sx1, sy1;
+                sel_range(sx0, sy0, sx1, sy1);
+                if (li >= sy0 && li <= sy1)
+                {
+                    const int b0  = (li == sy0) ? sx0 : 0;
+                    const int b1  = (li == sy1) ? sx1 : static_cast<int>(text.size());
+                    const int px0 = kGutter - left_ + font::text_width(text.substr(0, b0).c_str());
+                    int       pw  = font::text_width(text.substr(b0, b1 - b0).c_str());
+                    if (li < sy1)
+                        pw += 4; // the selected line break
+                    if (pw > 0)
+                        fb.rectfill(std::max(px0, kGutter - left_), y, px0 + pw - 1, y + lh - 1, 1);
+                }
+            }
+
             draw_line(fb, text, kGutter - left_, y); // syntax-highlighted, scrolled horizontally
 
             // Mask whatever scrolled under the gutter, then draw the line number over it.
@@ -699,11 +954,30 @@ namespace lazy100
         ui::help_button(fb, con, con.mouse(), static_cast<int>(kScreenW) - 15, statusY - 1, 5,
                         "CODE\n"
                         "type to edit; Tab: autocomplete\n"
-                        "click: place caret; wheel: scroll\n"
-                        "up/down while list open: pick\n"
-                        "arrows / home / end / pgup-dn\n"
+                        "click: caret; drag/shift+nav: select\n"
+                        "ctrl+A/C/X/V: all/copy/cut/paste\n"
+                        "right-click: cut/copy/paste menu\n"
                         "ctrl+tab: switch editor\n"
                         "book: API cheatsheet; ESC: menu");
+
+        // Right-click context menu, drawn on top of everything.
+        if (ctx_open_)
+        {
+            const int mh = kCtxCount * kCtxRow + 2;
+            ui::panel(fb, ctx_x_, ctx_y_, kCtxW, mh, ui::kPanel, ui::kBorderHi);
+            const Mouse& m = con.mouse();
+            for (int i = 0; i < kCtxCount; ++i)
+            {
+                const int  yy    = ctx_y_ + 1 + i * kCtxRow;
+                const bool hover = m.x() >= ctx_x_ && m.x() < ctx_x_ + kCtxW && m.y() >= yy &&
+                                   m.y() < yy + kCtxRow;
+                const bool dim = (i <= 1 && !has_sel()); // cut/copy need a selection
+                if (hover && !dim)
+                    fb.rectfill(ctx_x_ + 1, yy, ctx_x_ + kCtxW - 2, yy + kCtxRow - 1, ui::kBtnActive);
+                font::print(fb, kCtxItems[i], ctx_x_ + 5, yy + 2,
+                            dim ? ui::kBorder : (hover ? ui::kBg : ui::kText));
+            }
+        }
     }
 
     void CodeEditor::draw_manual(Framebuffer& fb, int statusY)
