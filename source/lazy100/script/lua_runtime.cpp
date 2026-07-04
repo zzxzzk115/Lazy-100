@@ -1,6 +1,7 @@
 #include "lazy100/script/lua_runtime.hpp"
 
 #include "lazy100/common/log.hpp"
+#include "lazy100/console/console.hpp"
 #include "lazy100/script/lua_api.hpp"
 
 namespace lazy100
@@ -44,6 +45,7 @@ namespace lazy100
         {
             sol::error err = result;
             LZ_ERROR("cart error: %s", err.what());
+            p_->console->set_last_error(err.what()); // surfaced by the code editor's error bar
             return false;
         }
         p_->init     = p_->lua["_init"];
@@ -55,7 +57,7 @@ namespace lazy100
 
     namespace
     {
-        void call_cb(sol::protected_function& f, const char* name)
+        void call_cb(Console* con, sol::protected_function& f, const char* name)
         {
             if (!f.valid())
                 return;
@@ -64,6 +66,8 @@ namespace lazy100
             {
                 sol::error err = r;
                 LZ_ERROR("%s() error: %s", name, err.what());
+                if (con)
+                    con->set_last_error(err.what()); // surfaced by the code editor's error bar
             }
         }
     } // namespace
@@ -71,7 +75,7 @@ namespace lazy100
     void LuaRuntime::call_init()
     {
         if (p_)
-            call_cb(p_->init, "_init");
+            call_cb(p_->console, p_->init, "_init");
     }
     void LuaRuntime::call_update()
     {
@@ -79,14 +83,14 @@ namespace lazy100
             return;
         // A cart picks its logic rate by which callback it defines; _update60 wins.
         if (p_->update60.valid())
-            call_cb(p_->update60, "_update60");
+            call_cb(p_->console, p_->update60, "_update60");
         else
-            call_cb(p_->update, "_update");
+            call_cb(p_->console, p_->update, "_update");
     }
     void LuaRuntime::call_draw()
     {
         if (p_)
-            call_cb(p_->draw, "_draw");
+            call_cb(p_->console, p_->draw, "_draw");
     }
 
     bool LuaRuntime::has_update() const { return p_ && (p_->update.valid() || p_->update60.valid()); }

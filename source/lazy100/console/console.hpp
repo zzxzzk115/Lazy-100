@@ -73,6 +73,13 @@ namespace lazy100
         void        resize_display(u32 w, u32 h) { window_.set_size(w, h); }
         void        quit() { running_ = false; } // exit the main loop
 
+        // Last cart script error (load/compile or runtime callback). The code editor shows it as
+        // an inline error bar — the only place it surfaces on the web, where logs are invisible.
+        // Cleared when a cart (re)load succeeds.
+        const std::string& last_error() const { return last_error_; }
+        void               set_last_error(const std::string& msg) { last_error_ = msg; }
+        void               clear_last_error() { last_error_.clear(); }
+
         double frame_dt() const { return dt_; } // seconds elapsed last frame (for UI timing)
         // Hover-delay gate for '?' tooltips: accumulates while the mouse rests on hotspot `id`,
         // returns true once it has hovered long enough. One hotspot is timed at a time.
@@ -245,6 +252,7 @@ namespace lazy100
         bool        has_cart_  = false;
         bool        running_   = true;
         bool        kiosk_     = false; // web home: hide developer pause-menu items (edit/explore/shell)
+        std::string last_error_;        // last cart script error, shown by the code editor
 
         double      boot_warm_t_ = 0.0;                 // seconds elapsed in the audio warm-up hold
         double      boot_t_      = 0.0;                 // seconds elapsed in the power-on splash

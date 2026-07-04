@@ -598,6 +598,27 @@ namespace lazy100
         std::snprintf(st, sizeof(st), "ln %d  col %d   Tab: complete   ESC: menu", cy_ + 1, cx_ + 1);
         font::print(fb, st, 2, statusY, ui::kDim);
 
+        // Cart error bar: the last script error (failed run or runtime callback), pinned above
+        // the status line. This is the only place errors surface on the web, where the native
+        // log is invisible. Cleared when the next run loads cleanly (Console::start_cart).
+        if (!con.last_error().empty())
+        {
+            std::string msg = con.last_error();
+            if (const size_t nl = msg.find('\n'); nl != std::string::npos)
+                msg = msg.substr(0, nl); // first line only: the core message, not the traceback
+            // Trim Lua's chunk prefix — '[string "..."]:12: bad thing' -> 'line 12: bad thing'.
+            if (const size_t p = msg.find("]:");
+                p != std::string::npos && p + 2 < msg.size() && msg[p + 2] >= '0' && msg[p + 2] <= '9')
+                msg = "line " + msg.substr(p + 2);
+            const int by = statusY - lh - 3;
+            fb.rectfill(0, by, static_cast<int>(kScreenW) - 1, by + lh + 1, 2);
+            draw::line(fb, 0, by, static_cast<int>(kScreenW) - 1, by, 8);
+            while (!msg.empty() && font::text_width(msg.c_str()) > static_cast<int>(kScreenW) - 14)
+                msg.pop_back(); // truncate to the bar width
+            font::print(fb, "!", 3, by + 2, 8);
+            font::print(fb, msg.c_str(), 10, by + 2, 7);
+        }
+
         // Autocomplete popup, anchored under the caret.
         if (!matches_.empty())
         {

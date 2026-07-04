@@ -468,6 +468,7 @@ namespace lazy100
     {
         if (lang_p8_ ? p8_raw_code_.empty() : code_.empty())
             return false;
+        clear_last_error(); // a fresh run starts clean; a failed load below re-sets it
         if (lang_p8_)
         {
             if (!p8vm_.load_source(p8_raw_code_)) // z8lua runs the dialect directly

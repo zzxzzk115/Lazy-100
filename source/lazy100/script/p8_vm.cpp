@@ -999,7 +999,9 @@ end
             std::ofstream(dump, std::ios::binary) << src;
         if (luaL_dostring(im.L, src.c_str()) != LUA_OK)
         {
-            LZ_ERROR("cart error: %s", lua_tostring(im.L, -1));
+            const char* msg = lua_tostring(im.L, -1);
+            LZ_ERROR("cart error: %s", msg ? msg : "unknown");
+            con().set_last_error(msg ? msg : "unknown p8 error"); // shown by the code editor
             return false;
         }
         auto has = [&](const char* n)
@@ -1028,7 +1030,9 @@ end
             }
             if (lua_pcall(L, 0, 0, 0) != LUA_OK)
             {
-                LZ_ERROR("%s() error: %s", name, lua_tostring(L, -1));
+                const char* msg = lua_tostring(L, -1);
+                LZ_ERROR("%s() error: %s", name, msg ? msg : "unknown");
+                con().set_last_error(msg ? msg : "unknown p8 error"); // code editor error bar
                 lua_pop(L, 1);
             }
         }
