@@ -25,7 +25,7 @@ namespace lazy100::apidoc
             {"circfill", "circfill(x, y, radius, [color])",       "filled circle"},
             {"oval",     "oval(x0, y0, x1, y1, [color])",         "ellipse outline in a bounding box"},
             {"ovalfill", "ovalfill(x0, y0, x1, y1, [color])",     "filled ellipse in a bounding box"},
-            {"print",    "print(text, [x], [y], [color])",        "draw text; returns the end x"},
+            {"print",    "print(text, [x], [y], [color])",        "draw text (\\1-\\6: arrow/O/X glyphs); returns end x"},
             {"camera",   "camera([x], [y])",                      "scroll offset for all drawing; no args resets"},
             {"clip",     "clip([x], [y], [w], [h])",              "restrict drawing to a rect; no args resets"},
             {"fillp",    "fillp([pattern], [color2])",            "4x4 dither for shapes; set bits draw color2 (default: skip); no args resets"},

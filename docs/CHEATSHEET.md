@@ -39,6 +39,16 @@ fillp([pattern], [color2])                 -- 4x4 dither for shapes; set bits dr
 sprites or `print`. The pattern is 16 bits, bit 15 = top-left of the 4x4 tile
 (e.g. `fillp(0b0101101001011010)` is a checkerboard).
 
+### Text glyphs
+
+Low bytes `\1`..`\15` inside a printed string draw as 8x8 button/mark pictographs, e.g.
+`print("press \6 to jump")`:
+
+```
+\1 <-  \2 ->  \3 up  \4 down  \5 O button  \6 X button
+\7 heart  \8 star  \11 note  \12 diamond  \14 flag  \15 face
+```
+
 ## Sprites
 
 ```lua
