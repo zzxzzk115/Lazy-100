@@ -31,11 +31,14 @@ int main()
     label.px[0]     = 7;
     label.px[100]   = 12;
     label.px.back() = 8;
+    CartMeta meta;
+    meta.title  = "Round Trip";
+    meta.author = "tester";
 
-    const std::string text = cart::serialize(code, sheet, map, bank, label);
+    const std::string text = cart::serialize(code, sheet, map, bank, label, meta);
 
     const char* path = "cartpng_test.png";
-    if (!cartpng::save(path, text, label, sheet, pal))
+    if (!cartpng::save(path, text, label, sheet, pal, meta.title, meta.author))
     {
         std::printf("FAIL: save\n");
         return 1;
@@ -59,7 +62,8 @@ int main()
     Map         map2;
     SoundBank   bank2;
     CartLabel   label2;
-    cart::parse(back, code2, sheet2, map2, bank2, label2);
+    CartMeta    meta2;
+    cart::parse(back, code2, sheet2, map2, bank2, label2, meta2);
     if (code2 != code)
     {
         std::printf("FAIL: code mismatch\n");
@@ -79,6 +83,11 @@ int main()
     {
         std::printf("FAIL: label mismatch\n");
         return 7;
+    }
+    if (meta2.title != meta.title || meta2.author != meta.author)
+    {
+        std::printf("FAIL: meta mismatch ('%s' by '%s')\n", meta2.title.c_str(), meta2.author.c_str());
+        return 8;
     }
 
     std::printf("OK: %zu-byte cart round-tripped through PNG; code+sheet+sound intact\n", text.size());
