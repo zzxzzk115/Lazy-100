@@ -10,7 +10,7 @@ target("lazy100-static")
     add_deps("z8lua", {public = true}) -- the p8-dialect Lua fork (P8Vm; native carts use lua+sol2)
     if not is_plat("wasm") then
         if is_plat("linux") and is_arch("armv7") then
-            -- armv7 cross: the multiarch system curl, linked directly (headers are the
+            -- armv7: the distro's system curl, linked directly (headers are the
             -- arch-independent /usr/include/curl; see external/xmake.lua for the why).
             add_syslinks("curl", {public = true})
         else

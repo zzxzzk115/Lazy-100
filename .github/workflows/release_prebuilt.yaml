@@ -35,13 +35,15 @@ jobs:
             plat: linux
             arch: arm64
             artifact_suffix: linux-arm64
-          # 32-bit ARM (Pi 2/3 or 32-bit OS): best-effort cross build; fail-fast is off, so a
-          # failure here never blocks the other platforms' assets.
-          - os: ubuntu-latest
+          # 32-bit ARM (Pi 2/3 or 32-bit OS): native armv7 build inside an arm32v7 container
+          # on the arm64 runner — no cross toolchain, so xmake package/system detection all
+          # behaves exactly like a real 32-bit box. fail-fast is off, so a failure here never
+          # blocks the other platforms' assets.
+          - os: ubuntu-24.04-arm
             plat: linux
             arch: armv7
             artifact_suffix: linux-armv7
-            cross: armhf
+            container: armv7
           - os: macos-latest
             plat: macosx
             arch: arm64
@@ -56,13 +58,14 @@ jobs:
           submodules: recursive
 
       - uses: xmake-io/github-action-setup-xmake@v1
+        if: ${{ !matrix.container }}
         with:
           xmake-version: latest
           actions-cache-folder: ".xmake-cache"
           build-cache: true
 
       - name: Install Linux Dependencies
-        if: ${{ matrix.plat == 'linux' && !matrix.cross }}
+        if: ${{ matrix.plat == 'linux' && !matrix.container }}
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config \
@@ -71,52 +74,12 @@ jobs:
             libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev \
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libdrm-dev libgbm-dev
 
-      # armv7 cross: multiarch apt for the armhf system libs + the gnueabihf toolchain.
-      - name: Setup armv7 Cross Environment
-        if: ${{ matrix.cross == 'armhf' }}
-        run: |
-          set -euo pipefail
-          sudo dpkg --add-architecture armhf
-          # amd64 stays on azure mirrors; armhf comes from ports.ubuntu.com.
-          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
-          sudo tee /etc/apt/sources.list.d/armhf.sources > /dev/null <<'EOF'
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: noble noble-updates noble-security
-          Components: main universe restricted multiverse
-          Architectures: armhf
-          EOF
-          sudo apt-get update
-          # qemu binfmt lets :armhf package postinst hooks (glib schema compilers etc.) run;
-          # --no-install-recommends keeps libdecor from dragging in the whole GTK3:armhf stack.
-          sudo apt-get install -y qemu-user-static binfmt-support
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config \
-            crossbuild-essential-armhf \
-            libx11-dev:armhf libxext-dev:armhf libxrandr-dev:armhf libxcursor-dev:armhf \
-            libxi-dev:armhf libxfixes-dev:armhf libxss-dev:armhf libwayland-dev:armhf \
-            libxkbcommon-dev:armhf libdecor-0-dev:armhf libegl1-mesa-dev:armhf \
-            libgl1-mesa-dev:armhf libvulkan-dev:armhf libasound2-dev:armhf \
-            libdbus-1-dev:armhf libudev-dev:armhf libdrm-dev:armhf \
-            libgbm-dev:armhf libcurl4-openssl-dev:armhf
-          # no libpulse-dev:armhf — it drags in libglib2.0-dev:armhf, whose armhf build
-          # on ports.ubuntu.com lags the azure amd64 mirror (exact-version dep deadlock).
-          # 32-bit Pi audio goes through ALSA anyway.
-
       - name: Configure
-        if: ${{ !matrix.cross }}
+        if: ${{ !matrix.container }}
         run: xmake f -m release -p ${{ matrix.plat }} -a ${{ matrix.arch }} --lazy100_build_tests=n --policies=build.ccache:y -y
 
-      - name: Configure (armv7 cross)
-        if: ${{ matrix.cross == 'armhf' }}
-        env:
-          PKG_CONFIG_PATH: /usr/lib/arm-linux-gnueabihf/pkgconfig
-        run: >
-          xmake f -m release -p linux -a armv7 --toolchain=cross --cross=arm-linux-gnueabihf-
-          --cxflags="-I/usr/include -I/usr/include/arm-linux-gnueabihf"
-          --ldflags="-L/usr/lib/arm-linux-gnueabihf"
-          --lazy100_build_tests=n --policies=build.ccache:y -y
-
       - name: Build console + tools
+        if: ${{ !matrix.container }}
         run: |
           git config --global pull.rebase false
           xmake repo -u
@@ -125,6 +88,35 @@ jobs:
           xmake build -y lazy100
           xmake build -y cartshot
           xmake build -y cartwav
+
+      - name: Build in armv7 container
+        if: ${{ matrix.container == 'armv7' }}
+        run: |
+          # qemu binfmt as a fallback in case the arm64 host CPU lacks AArch32 support.
+          sudo apt-get update && sudo apt-get install -y qemu-user-static binfmt-support
+          docker run --rm --platform linux/arm/v7 -v "$PWD:/work" -w /work arm32v7/ubuntu:24.04 \
+            bash -euo pipefail -c '
+              export DEBIAN_FRONTEND=noninteractive XMAKE_ROOT=y
+              apt-get update
+              apt-get install -y build-essential cmake ninja-build pkg-config git curl unzip \
+                ca-certificates util-linux \
+                libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev \
+                libxss-dev libwayland-dev libxkbcommon-dev libdecor-0-dev \
+                libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev \
+                libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libdrm-dev libgbm-dev \
+                libcurl4-openssl-dev
+              git config --global --add safe.directory "*"
+              git config --global pull.rebase false
+              # no prebuilt xmake for armv7: the installer builds it from source (a few minutes)
+              curl -fsSL https://xmake.io/shget.text | bash
+              source ~/.xmake/profile
+              # setarch linux32 so uname reports a 32-bit machine to configure scripts
+              setarch linux32 xmake f -m release -p linux -a armv7 --lazy100_build_tests=n -y
+              setarch linux32 xmake build -y lazy100
+              setarch linux32 xmake build -y cartshot
+              setarch linux32 xmake build -y cartwav
+              chmod -R a+rw build
+            '
 
       - name: Package Bundle
         shell: bash
