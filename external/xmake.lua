@@ -25,9 +25,9 @@ if not is_plat("wasm") then
     -- explore downloads (catalog + carts + previews) on desktop; wasm uses emscripten_fetch
     -- instead (built-in, -sFETCH), so no curl there.
     if is_plat("linux") and is_arch("armv7") then
-        -- armv7 cross: xmake can't cross-build openssl3, so use the multiarch system curl
-        -- (libcurl4-openssl-dev:armhf, found via PKG_CONFIG_PATH) instead of building one.
-        add_requires("libcurl", {system = true})
+        -- armv7 cross: xmake can't cross-build openssl3 and refuses system packages when
+        -- cross-compiling, so no require here at all — lazy100-static links the multiarch
+        -- system curl (libcurl4-openssl-dev:armhf) directly via add_syslinks("curl").
     else
         add_requires("libcurl")
     end
