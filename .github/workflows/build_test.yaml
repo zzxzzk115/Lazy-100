@@ -1,0 +1,113 @@
+name: Build Test
+
+# Compile-only CI: proves the console + tools build on every release platform without
+# touching tags or releases. Green here = safe to (re)tag a release.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "source/**"
+      - "tools/**"
+      - "xmake.lua"
+      - ".github/workflows/build_test.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            plat: windows
+            arch: x64
+          - os: ubuntu-latest
+            plat: linux
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            plat: linux
+            arch: arm64
+          - os: ubuntu-latest
+            plat: linux
+            arch: armv7
+            cross: armhf
+          - os: macos-latest
+            plat: macosx
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+          actions-cache-folder: ".xmake-cache"
+          build-cache: true
+
+      - name: Install Linux Dependencies
+        if: ${{ matrix.plat == 'linux' && !matrix.cross }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev libdecor-0-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libdrm-dev libgbm-dev
+
+      - name: Setup armv7 Cross Environment
+        if: ${{ matrix.cross == 'armhf' }}
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture armhf
+          # amd64 stays on azure mirrors; armhf comes from ports.ubuntu.com.
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
+          sudo tee /etc/apt/sources.list.d/armhf.sources > /dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-security
+          Components: main universe restricted multiverse
+          Architectures: armhf
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            crossbuild-essential-armhf \
+            libx11-dev:armhf libxext-dev:armhf libxrandr-dev:armhf libxcursor-dev:armhf \
+            libxi-dev:armhf libxfixes-dev:armhf libxss-dev:armhf libwayland-dev:armhf \
+            libxkbcommon-dev:armhf libdecor-0-dev:armhf libegl1-mesa-dev:armhf \
+            libgl1-mesa-dev:armhf libvulkan-dev:armhf libasound2-dev:armhf \
+            libdbus-1-dev:armhf libudev-dev:armhf libdrm-dev:armhf \
+            libgbm-dev:armhf
+          # no libpulse-dev:armhf — it drags in libglib2.0-dev:armhf, whose armhf build
+          # on ports.ubuntu.com lags the azure amd64 mirror (exact-version dep deadlock).
+          # 32-bit Pi audio goes through ALSA anyway.
+
+      - name: Configure
+        if: ${{ !matrix.cross }}
+        run: xmake f -m release -p ${{ matrix.plat }} -a ${{ matrix.arch }} --lazy100_build_tests=n --policies=build.ccache:y -y
+
+      - name: Configure (armv7 cross)
+        if: ${{ matrix.cross == 'armhf' }}
+        env:
+          PKG_CONFIG_PATH: /usr/lib/arm-linux-gnueabihf/pkgconfig
+        run: >
+          xmake f -m release -p linux -a armv7 --toolchain=cross --cross=arm-linux-gnueabihf-
+          --cxflags="-I/usr/include -I/usr/include/arm-linux-gnueabihf"
+          --ldflags="-L/usr/lib/arm-linux-gnueabihf"
+          --lazy100_build_tests=n --policies=build.ccache:y -y
+
+      - name: Build console + tools
+        run: |
+          git config --global pull.rebase false
+          xmake repo -u
+          # one target per invocation: xmake's build command takes a single target,
+          # and the tools are set_default(false) so a bare `xmake` skips them
+          xmake build -y lazy100
+          xmake build -y cartshot
+          xmake build -y cartwav
