@@ -114,7 +114,11 @@ jobs:
         run: |
           git config --global pull.rebase false
           xmake repo -u
-          xmake build -y lazy100 cartshot cartwav
+          # one target per invocation: xmake's build command takes a single target,
+          # and the tools are set_default(false) so a bare `xmake` skips them
+          xmake build -y lazy100
+          xmake build -y cartshot
+          xmake build -y cartwav
 
       - name: Package Bundle
         shell: bash
