@@ -66,6 +66,15 @@ if is_plat("linux") and is_arch("armv7") then
                            "**.vbase", "**.vtask", "**.enkits"}) do
         add_requireconfs(name, fpuconf)
     end
+    -- The desktop stack comes from the distro (apt -dev packages), never from source:
+    -- otherwise libsdl3's package deps rebuild all of X11 — dragging in a python/
+    -- autoconf/openssl host-tool subtree that keeps finding new ways to fail on armv7.
+    for _, name in ipairs({"**.libx11", "**.libxcb", "**.libxext", "**.libxrandr",
+                           "**.libxrender", "**.libxfixes", "**.libxi", "**.libxcursor",
+                           "**.libxscrnsaver", "**.libxkbcommon", "**.wayland",
+                           "**.wayland-protocols"}) do
+        add_requireconfs(name, {system = true})
+    end
 end
 
 -- add repositories

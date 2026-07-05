@@ -104,11 +104,14 @@ jobs:
                 ca-certificates util-linux \
                 libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev \
                 libxss-dev libwayland-dev libxkbcommon-dev libdecor-0-dev \
+                libxrender-dev libxcb1-dev wayland-protocols python3 \
                 libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev \
                 libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libdrm-dev libgbm-dev \
                 libcurl4-openssl-dev
               git config --global --add safe.directory "*"
               git config --global pull.rebase false
+              # on any xmake failure, dump the failed package install logs before dying
+              trap "cat /root/.xmake/cache/packages/*/*/*/*/installdir.failed/logs/install.txt 2>/dev/null || true" ERR
               # no prebuilt xmake for armv7: build it from source. Straight from GitHub —
               # the official installer script picks its mirror by network probing and can
               # wander off to gitee (CN mirror) with a broken version string on CI runners.
