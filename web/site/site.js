@@ -12,6 +12,7 @@
 
   var games = [], activeCat = null, query = "", catalogReady = false;
   var cartParam = new URLSearchParams(location.search).get("cart");
+  var paramMode = !!cartParam; // sticky: keeps armRandom away while the ?cart fetch is in flight
   // ?cart_url=<raw url>: play a cart straight from a URL (the catalog PR bot links PR previews
   // this way). Locked to raw.githubusercontent.com so the page can't be used as a fetch proxy.
   var cartUrlParam = new URLSearchParams(location.search).get("cart_url");
@@ -162,7 +163,7 @@
   // gesture (key, tap, or a virtual gamepad button) is what unlocks/warms the audio.
   var armed = false;
   function armRandom() {
-    if (PAGE !== "home" || cartParam || urlMode || armed || !games.length || !window.lzReady) return;
+    if (PAGE !== "home" || paramMode || urlMode || armed || !games.length || !window.lzReady) return;
     armed = true;
     withCart(games[Math.floor(Math.random() * games.length)], function (path, gg) {
       window.Module.ccall("lazy100_arm_cart", "number", ["string"], [path]);
@@ -499,10 +500,18 @@
   }
 
   /* ---- per-page init ---- */
+  // ?cart=<id> (a carts-page click landing here): ARM the cart on the press-any-key gate
+  // instead of booting it — the navigation is not a user gesture, and the gate's keypress
+  // is what unlocks the audio. Direct clicks on home cards still boot immediately.
   function tryStartParam() {
     if (PAGE !== "home" || !cartParam || !catalogReady || !window.lzReady) return;
     var g = games.filter(function (x) { return x.id === cartParam; })[0];
-    if (g) { bootGame(g); cartParam = null; }
+    if (!g) return;
+    cartParam = null;
+    withCart(g, function (path, gg) {
+      window.Module.ccall("lazy100_arm_cart", "number", ["string"], [path]);
+      log("press any key to play " + (gg.name || gg.id), "l");
+    });
   }
   // ?cart_url: fetch the cart into MEMFS and ARM it — the press-any-key gate both unlocks the
   // audio and starts it, since a page load is not a user gesture.
