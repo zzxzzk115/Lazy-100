@@ -56,7 +56,16 @@ if is_plat("linux") and is_arch("armv7") then
     add_cflags(armfpu)
     add_cxxflags(armfpu)
     add_asflags(armfpu)
-    add_requireconfs("**", {configs = {cflags = armfpu, cxflags = armfpu, asflags = armfpu}})
+    -- Only the packages actually compiled from source get the flag. A blanket "**" would
+    -- attach custom configs to the X11/system libs too, which turns off xmake's
+    -- system-package detection (forcing the whole desktop stack to rebuild) and spawns
+    -- duplicate package instances (libxext#1, ...) that race each other during install.
+    local fpuconf = {configs = {cflags = armfpu, cxflags = armfpu, asflags = armfpu}}
+    for _, name in ipairs({"vri", "vfilesystem", "libsdl3", "lua",
+                           "**.openssl", "**.openssl3", "**.spirv-cross",
+                           "**.vbase", "**.vtask", "**.enkits"}) do
+        add_requireconfs(name, fpuconf)
+    end
 end
 
 -- add repositories
