@@ -51,7 +51,8 @@ add_rules("clangd.config")
 -- then clashes with the hard-float ABI every armhf distro uses ("selected architecture
 -- lacks an FPU"). Re-add the FPU (+fp = VFPv3-D16, the Debian/Ubuntu armhf baseline) for
 -- the project and for every package build.
-if is_plat("linux") and is_arch("armv7") then
+-- (armv8l/armv7l: what uname reports for a native 32-bit userland on arm64/arm32 kernels)
+if is_plat("linux") and is_arch("armv7", "armv7l", "armv8l") then
     local armfpu = "-march=armv7-a+fp"
     add_cflags(armfpu)
     add_cxxflags(armfpu)

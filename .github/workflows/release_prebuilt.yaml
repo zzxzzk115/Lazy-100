@@ -123,7 +123,10 @@ jobs:
               cd /work
               export PATH="$HOME/.local/bin:$PATH"
               xmake --version
-              xmake f -m release -p linux -a armv7 --lazy100_build_tests=n -y
+              # no -a: with setarch the host reports armv8l, and passing -a armv7 makes
+              # xmake treat the build as cross-compilation and refuse system packages.
+              # Fully native = distro X11 libs get picked up just like on x86_64.
+              xmake f -m release -p linux --lazy100_build_tests=n -y
               xmake build -y lazy100
               xmake build -y cartshot
               xmake build -y cartwav
@@ -138,6 +141,9 @@ jobs:
           NAME="lazy100-${VERSION}-${{ matrix.artifact_suffix }}"
           STAGE="prebuilt/${NAME}"
           OUT="build/${{ matrix.plat }}/${{ matrix.arch }}/release"
+          # container-native armv7 configures without -a, so the dir is what uname said
+          # (e.g. build/linux/armv8l/release) — fall back to whatever single arch was built
+          [ -d "${OUT}" ] || OUT=$(ls -d build/${{ matrix.plat }}/*/release | head -1)
           mkdir -p "${STAGE}"
 
           EXE=""; [ "${{ matrix.plat }}" = "windows" ] && EXE=".exe"
