@@ -109,10 +109,17 @@ jobs:
                 libcurl4-openssl-dev
               git config --global --add safe.directory "*"
               git config --global pull.rebase false
-              # no prebuilt xmake for armv7: the installer builds it from source (a few minutes).
-              # PATH by hand: its ~/.xmake/profile trips over set -u (unbound FISH_VERSION).
-              curl -fsSL https://xmake.io/shget.text | bash
+              # no prebuilt xmake for armv7: build it from source. Straight from GitHub —
+              # the official installer script picks its mirror by network probing and can
+              # wander off to gitee (CN mirror) with a broken version string on CI runners.
+              git clone --depth 1 --recursive https://github.com/xmake-io/xmake.git /tmp/xmake-src
+              cd /tmp/xmake-src
+              ./configure
+              make -j"$(nproc)"
+              make install PREFIX="$HOME/.local"
+              cd /work
               export PATH="$HOME/.local/bin:$PATH"
+              xmake --version
               xmake f -m release -p linux -a armv7 --lazy100_build_tests=n -y
               xmake build -y lazy100
               xmake build -y cartshot
