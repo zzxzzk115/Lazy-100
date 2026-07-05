@@ -94,8 +94,10 @@ jobs:
         run: |
           # qemu binfmt as a fallback in case the arm64 host CPU lacks AArch32 support.
           sudo apt-get update && sudo apt-get install -y qemu-user-static binfmt-support
+          # setarch linux32 wraps everything so uname reports a 32-bit machine (armv8l) to
+          # xmake's host detection and every package configure script.
           docker run --rm --platform linux/arm/v7 -v "$PWD:/work" -w /work arm32v7/ubuntu:24.04 \
-            bash -euo pipefail -c '
+            setarch linux32 bash -euo pipefail -c '
               export DEBIAN_FRONTEND=noninteractive XMAKE_ROOT=y
               apt-get update
               apt-get install -y build-essential cmake ninja-build pkg-config git curl unzip \
@@ -107,14 +109,14 @@ jobs:
                 libcurl4-openssl-dev
               git config --global --add safe.directory "*"
               git config --global pull.rebase false
-              # no prebuilt xmake for armv7: the installer builds it from source (a few minutes)
+              # no prebuilt xmake for armv7: the installer builds it from source (a few minutes).
+              # PATH by hand: its ~/.xmake/profile trips over set -u (unbound FISH_VERSION).
               curl -fsSL https://xmake.io/shget.text | bash
-              source ~/.xmake/profile
-              # setarch linux32 so uname reports a 32-bit machine to configure scripts
-              setarch linux32 xmake f -m release -p linux -a armv7 --lazy100_build_tests=n -y
-              setarch linux32 xmake build -y lazy100
-              setarch linux32 xmake build -y cartshot
-              setarch linux32 xmake build -y cartwav
+              export PATH="$HOME/.local/bin:$PATH"
+              xmake f -m release -p linux -a armv7 --lazy100_build_tests=n -y
+              xmake build -y lazy100
+              xmake build -y cartshot
+              xmake build -y cartwav
               chmod -R a+rw build
             '
 
