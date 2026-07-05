@@ -3,6 +3,7 @@
 #include "lazy100/video/cursor.hpp"
 #include "lazy100/video/icons.hpp"
 
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -50,7 +51,7 @@ namespace lazy100
         cursor::Type cursor(Console& con) const { return editors_[current_]->cursor(con); }
 
         // Offer ESC to the active editor first (overlays close themselves before the pause menu).
-        bool on_escape(Console& con) { return editors_[static_cast<size_t>(current_)]->on_escape(con); }
+        bool on_escape(Console& con) { return editors_[static_cast<std::size_t>(current_)]->on_escape(con); }
 
     private:
         std::vector<std::unique_ptr<Editor>> editors_;

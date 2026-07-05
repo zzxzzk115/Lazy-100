@@ -3,6 +3,7 @@
 #include "lazy100/common/types.hpp"
 
 #include <array>
+#include <cstddef>
 
 namespace lazy100
 {
@@ -14,7 +15,7 @@ namespace lazy100
         static constexpr int kW = 320;
         static constexpr int kH = 240;
 
-        std::array<u8, static_cast<size_t>(kW) * kH> px {};
+        std::array<u8, static_cast<std::size_t>(kW) * kH> px {};
         bool                                         present = false; // false => no label captured yet
 
         void clear()
