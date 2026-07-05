@@ -11,6 +11,11 @@ target("lazy100-static")
     if not is_plat("wasm") then
         add_packages("libcurl", {public = true}) -- net::Fetch desktop backend
     end
+    if is_plat("linux") then
+        -- VRI's GL backend opens its context through EGL (+ the wayland-egl window bridge)
+        -- but the vri package doesn't declare either lib; link them for every binary here.
+        add_syslinks("EGL", "wayland-egl", {public = true})
+    end
 target_end()
 
 -- The host application: the `lazy100` executable that links the kernel above.

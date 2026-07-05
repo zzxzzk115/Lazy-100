@@ -24,7 +24,13 @@ add_requires("nlohmann_json") -- games catalog (games.json) parsing for the expl
 if not is_plat("wasm") then
     -- explore downloads (catalog + carts + previews) on desktop; wasm uses emscripten_fetch
     -- instead (built-in, -sFETCH), so no curl there.
-    add_requires("libcurl")
+    if is_plat("linux") and is_arch("armv7") then
+        -- armv7 cross: xmake can't cross-build openssl3, so use the multiarch system curl
+        -- (libcurl4-openssl-dev:armhf, found via PKG_CONFIG_PATH) instead of building one.
+        add_requires("libcurl", {system = true})
+    else
+        add_requires("libcurl")
+    end
 end
 
 -- vendored: the p8-dialect Lua fork (see z8lua/xmake.lua)
