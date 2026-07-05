@@ -103,6 +103,19 @@ jobs:
               git config --global pull.rebase false
               # on any xmake failure, dump the failed package install logs before dying
               trap "cat /root/.xmake/cache/packages/*/*/*/*/installdir.failed/logs/install.txt 2>/dev/null || true" ERR
+              # xmake hardwires a bare -march=armv7-a for 32-bit arm, which resets gcc'\''s
+              # FPU and clashes with the hard-float ABI; its package layer offers no way to
+              # append flags. Shim the compilers to rewrite it to -march=armv7-a+fp
+              # (VFPv3-D16, the armhf distro baseline) for every build.
+              for t in gcc g++ cc c++; do
+                real="$(command -v "$t")"
+                printf "%s\n" "#!/bin/bash" \
+                  "args=()" \
+                  "for a in \"\$@\"; do [ \"\$a\" = -march=armv7-a ] && a=-march=armv7-a+fp; args+=(\"\$a\"); done" \
+                  "exec $real \"\${args[@]}\"" > "/usr/local/bin/$t"
+                chmod +x "/usr/local/bin/$t"
+              done
+              hash -r
               # no prebuilt xmake for armv7: build it from source. Straight from GitHub —
               # the official installer script picks its mirror by network probing and can
               # wander off to gitee (CN mirror) with a broken version string on CI runners.

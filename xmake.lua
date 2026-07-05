@@ -49,24 +49,16 @@ add_rules("clangd.config")
 
 -- 32-bit ARM: xmake injects a bare -march=armv7-a, which resets gcc's FPU selection and
 -- then clashes with the hard-float ABI every armhf distro uses ("selected architecture
--- lacks an FPU"). Re-add the FPU (+fp = VFPv3-D16, the Debian/Ubuntu armhf baseline) for
--- the project and for every package build.
+-- lacks an FPU"). The project's own targets get +fp here (VFPv3-D16, the Debian/Ubuntu
+-- armhf baseline); source-built PACKAGES can't be reached through requireconfs (their
+-- installers ignore custom cflags, and the extra configs spawn duplicate #1 instances),
+-- so CI shims gcc instead — see "Build in armv7 container" in the workflows.
 -- (armv8l/armv7l: what uname reports for a native 32-bit userland on arm64/arm32 kernels)
 if is_plat("linux") and is_arch("arm", "armv7", "armv7l", "armv8l") then
     local armfpu = "-march=armv7-a+fp"
     add_cflags(armfpu)
     add_cxxflags(armfpu)
     add_asflags(armfpu)
-    -- Only the packages actually compiled from source get the flag. A blanket "**" would
-    -- attach custom configs to the X11/system libs too, which turns off xmake's
-    -- system-package detection (forcing the whole desktop stack to rebuild) and spawns
-    -- duplicate package instances (libxext#1, ...) that race each other during install.
-    local fpuconf = {configs = {cflags = armfpu, cxflags = armfpu, asflags = armfpu}}
-    for _, name in ipairs({"vri", "vfilesystem", "libsdl3", "lua",
-                           "**.openssl", "**.openssl3", "**.spirv-cross",
-                           "**.vbase", "**.vtask", "**.enkits"}) do
-        add_requireconfs(name, fpuconf)
-    end
     -- The desktop stack comes from the distro (apt -dev packages), never from source:
     -- otherwise libsdl3's package deps rebuild all of X11 — dragging in a python/
     -- autoconf/openssl host-tool subtree that keeps finding new ways to fail on armv7.
