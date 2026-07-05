@@ -34,3 +34,6 @@ carts/bbs/
 
 # Scratch cart generators (not part of the product)
 scripts/lazybird/
+
+# Generated or fetched .lz100.png cartridges
+carts/**.lz100.png
