@@ -8,6 +8,7 @@
 #include "lazy100/video/framebuffer.hpp"
 #include "lazy100/video/icons.hpp"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 

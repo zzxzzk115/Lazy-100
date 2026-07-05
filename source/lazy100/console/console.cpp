@@ -11,8 +11,10 @@
 #include "lazy100/video/cursor.hpp"
 #include "lazy100/video/font.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <cstdlib>
 #include <fstream>
