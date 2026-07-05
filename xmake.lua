@@ -47,6 +47,18 @@ add_rules("plugin.vsxmake.autoupdate")
 add_rules("plugin.compile_commands.autoupdate", {outputdir = ".vscode", lsp = "clangd"})
 add_rules("clangd.config")
 
+-- 32-bit ARM: xmake injects a bare -march=armv7-a, which resets gcc's FPU selection and
+-- then clashes with the hard-float ABI every armhf distro uses ("selected architecture
+-- lacks an FPU"). Re-add the FPU (+fp = VFPv3-D16, the Debian/Ubuntu armhf baseline) for
+-- the project and for every package build.
+if is_plat("linux") and is_arch("armv7") then
+    local armfpu = "-march=armv7-a+fp"
+    add_cflags(armfpu)
+    add_cxxflags(armfpu)
+    add_asflags(armfpu)
+    add_requireconfs("**", {configs = {cflags = armfpu, cxflags = armfpu, asflags = armfpu}})
+end
+
 -- add repositories
 add_repositories("my-xmake-repo https://github.com/zzxzzk115/xmake-repo.git backup")
 
