@@ -24,7 +24,7 @@ add_requires("nlohmann_json") -- games catalog (games.json) parsing for the expl
 if not is_plat("wasm") then
     -- explore downloads (catalog + carts + previews) on desktop; wasm uses emscripten_fetch
     -- instead (built-in, -sFETCH), so no curl there.
-    if is_plat("linux") and is_arch("armv7", "armv7l", "armv8l") then
+    if is_plat("linux") and is_arch("arm", "armv7", "armv7l", "armv8l") then
         -- armv7 (32-bit Pi class): skip the xmake libcurl package — its openssl3 dep is
         -- slow/fragile to build on this arch. lazy100-static links the distro's curl
         -- (libcurl4-openssl-dev) directly via add_syslinks("curl") instead.

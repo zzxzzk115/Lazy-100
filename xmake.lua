@@ -52,7 +52,7 @@ add_rules("clangd.config")
 -- lacks an FPU"). Re-add the FPU (+fp = VFPv3-D16, the Debian/Ubuntu armhf baseline) for
 -- the project and for every package build.
 -- (armv8l/armv7l: what uname reports for a native 32-bit userland on arm64/arm32 kernels)
-if is_plat("linux") and is_arch("armv7", "armv7l", "armv8l") then
+if is_plat("linux") and is_arch("arm", "armv7", "armv7l", "armv8l") then
     local armfpu = "-march=armv7-a+fp"
     add_cflags(armfpu)
     add_cxxflags(armfpu)
