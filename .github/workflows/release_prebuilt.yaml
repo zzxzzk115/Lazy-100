@@ -93,8 +93,11 @@ jobs:
             libxi-dev:armhf libxfixes-dev:armhf libxss-dev:armhf libwayland-dev:armhf \
             libxkbcommon-dev:armhf libdecor-0-dev:armhf libegl1-mesa-dev:armhf \
             libgl1-mesa-dev:armhf libvulkan-dev:armhf libasound2-dev:armhf \
-            libpulse-dev:armhf libdbus-1-dev:armhf libudev-dev:armhf libdrm-dev:armhf \
+            libdbus-1-dev:armhf libudev-dev:armhf libdrm-dev:armhf \
             libgbm-dev:armhf
+          # no libpulse-dev:armhf — it drags in libglib2.0-dev:armhf, whose armhf build
+          # on ports.ubuntu.com lags the azure amd64 mirror (exact-version dep deadlock).
+          # 32-bit Pi audio goes through ALSA anyway.
 
       - name: Configure
         if: ${{ !matrix.cross }}
